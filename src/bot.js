@@ -1,51 +1,40 @@
 #!/usr/bin/env node
-// bot.js — Telegram NFT minter bot. Owner-guarded. Wraps the mint engine.
-//
-// Commands:
-//   /mint <url|contract> [chain] [amount]   — detect + simulate + send + report
-//   /mintat <time> | <url|contract> ...      — mint at a scheduled time
-//   /mintopen <url|contract> ...             — poll on-chain open, mint the instant it opens
-//   /check <url|contract> [chain]            — dry-run: detect fn/price, no send
-//   /jobs                                    — list scheduled/running mint jobs
-//   /cancel <id>                             — cancel a scheduled job
-//   /wallet                                  — show wallet address + balances
-//   /help
 import "dotenv/config";
-import TelegramBot from "node-telegram-bot-api";
 import { ethers } from "ethers";
+import TelegramBot from "node-telegram-bot-api";
+import { checkAllowlist } from "./allowlist.js";
+import { CHAIN_IDS, explorerUrl, getProvider } from "./chains.js";
+import { detectMintFunction, detectPrice, mintMany } from "./mint.js";
+import { getSessionCookies } from "./opensea-auth.js";
+import {
+  getCollectionMeta,
+  getDropEligibility,
+  getDropStages,
+  getEligibleOpenWindow,
+} from "./opensea-drop.js";
 import { parseTarget } from "./parse.js";
-import { resolveTarget } from "./resolve.js";
-import { mintOne, mintMany, detectMintFunction, detectPrice } from "./mint.js";
 import {
   extractMaxPriceSpec,
   parsePriceSpec,
   resolveTargetPrice,
 } from "./price.js";
-import {
-  detectSeadrop,
-  getPublicDrop,
-  getAllowlistRoot,
-  getMintMechanisms,
-  tokenStatus,
-} from "./seadrop.js";
-import { checkAllowlist } from "./allowlist.js";
+import { resolveTarget } from "./resolve.js";
 import { getEligibleLists, pickBestList } from "./scatter.js";
-import {
-  getDropStages,
-  getDropEligibility,
-  getCollectionMeta,
-  getEligibleOpenWindow,
-} from "./opensea-drop.js";
-import { getSessionCookies } from "./opensea-auth.js";
-import { getProvider, CHAIN_IDS, explorerUrl } from "./chains.js";
 import {
   mintAt,
   mintWhenOpen,
   parseWhen,
   resolveOpenTime,
 } from "./schedule.js";
-import { loadWallets, selectWallets, extractWalletSpec } from "./wallets.js";
-import { fmtWAT, fmtDuration } from "./time.js";
+import {
+  detectSeadrop,
+  getAllowlistRoot,
+  getMintMechanisms,
+  getPublicDrop,
+  tokenStatus,
+} from "./seadrop.js";
+import { fmtDuration, fmtWAT } from "./time.js";
+import { extractWalletSpec, loadWallets, selectWallets } from "./wallets.js";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TOKEN) {

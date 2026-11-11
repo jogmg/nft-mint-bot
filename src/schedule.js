@@ -1,11 +1,11 @@
 import { ethers } from "ethers";
-import { fmtWAT } from "./time.js";
 import { getProvider } from "./chains.js";
-import { mintOne, mintMany } from "./mint.js";
-import { detectSeadrop, getPublicDrop } from "./seadrop.js";
+import { mintMany, mintOne } from "./mint.js";
 import { getSessionCookies } from "./opensea-auth.js";
 import { getEligibleOpenWindow } from "./opensea-drop.js";
-import { resolveTargetPrice, assertPriceProtection } from "./price.js";
+import { assertPriceProtection, resolveTargetPrice } from "./price.js";
+import { detectSeadrop, getPublicDrop } from "./seadrop.js";
+import { fmtWAT } from "./time.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -38,9 +38,6 @@ async function prewarmOpensea(target, wallets, onEvent) {
   );
 }
 
-// Parse a "when" spec into an absolute unix seconds timestamp.
-// Accepts: unix seconds (10 digits), unix ms (13 digits), ISO 8601,
-// relative "in 30s|5m|2h|1d" / "30s" / "5m", or "HH:MM" (next occurrence, WAT).
 export function parseWhen(spec, nowMs = Date.now()) {
   const s = String(spec).trim().toLowerCase();
 
@@ -79,9 +76,6 @@ export function parseWhen(spec, nowMs = Date.now()) {
   throw new Error(`cannot parse time: "${spec}"`);
 }
 
-// Resolve the on-chain launch window for a Seadrop target. Returns
-// { startTime, endTime } unix seconds (endTime 0 → open-ended), or null if the
-// target isn't a configured Seadrop.
 export async function resolveOpenWindow(target) {
   const provider = getProvider(target.chain);
   const sd = await detectSeadrop(target.contract, provider);
@@ -94,15 +88,11 @@ export async function resolveOpenWindow(target) {
   };
 }
 
-// Back-compat: just the open time (used for display). null when unknown.
 export async function resolveOpenTime(target) {
   const win = await resolveOpenWindow(target);
   return win ? win.startTime : null;
 }
 
-// Mint at (or just after) an absolute unix timestamp. Delegates the full
-// precise wait + hot-path landing to mintWhenOpen (startAtUnix), so waiting
-// never competes with the poll watch-window. `wallets` may be one or an array.
 export async function mintAt(
   target,
   wallets,
@@ -123,11 +113,6 @@ export async function mintAt(
   });
 }
 
-// Tunables adopted from osnm-z:
-//   HOT_LEAD_MS   — wake precisely this long before open, then busy-sleep to the
-//                   exact second (osnm-z CALLDATA_HOT_LEAD_MS = 2000).
-//   REFRESH_MS    — while waiting far out, re-probe the on-chain window this
-//                   often so a shifted start time is picked up (StageChanged).
 const HOT_LEAD_MS = 2000;
 const REFRESH_MS = 30_000;
 
@@ -170,10 +155,6 @@ function isFatalMintError(error, message) {
   );
 }
 
-// Poll until the mint is actually open, then send from every wallet. For
-// Seadrop, spins from `startAtUnix` (or the resolved startTime). For generic
-// mints, just polls the simulation. `wallets` may be one wallet or an array.
-// `opts` can include `maxPriceWei` to protect against price changes.
 export async function mintWhenOpen(
   target,
   wallets,

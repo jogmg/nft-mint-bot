@@ -1,20 +1,20 @@
 // mint.js — universal mint engine: detect fn → price → gas → simulate → send → report
 import { ethers } from "ethers";
-import { getProvider, explorerUrl } from "./chains.js";
+import { checkAllowlist } from "./allowlist.js";
+import { explorerUrl, getProvider } from "./chains.js";
+import { getSessionCookies } from "./opensea-auth.js";
+import { buildOpenseaMint, explainOpenseaError } from "./opensea-drop.js";
+import { PRICE_READERS, assertPriceProtection, detectPrice } from "./price.js";
+import { buildScatterMint, getEligibleLists, pickBestList } from "./scatter.js";
 import {
-  detectSeadrop,
-  buildSeadropMint,
   buildAllowListMint,
+  buildSeadropMint,
+  detectSeadrop,
   getAllowlistRoot,
   getMintMechanisms,
   tokenStatus,
 } from "./seadrop.js";
-import { checkAllowlist } from "./allowlist.js";
-import { getEligibleLists, pickBestList, buildScatterMint } from "./scatter.js";
-import { buildOpenseaMint, explainOpenseaError } from "./opensea-drop.js";
-import { getSessionCookies } from "./opensea-auth.js";
 import { fmtWAT } from "./time.js";
-import { PRICE_READERS, detectPrice, assertPriceProtection } from "./price.js";
 
 // Ordered by specificity. Protocol-tagged entries are handled specially.
 const MINT_SIGNATURES = [
@@ -593,4 +593,4 @@ export async function mintMany(target, wallets, onEvent = () => {}, opts = {}) {
   return results;
 }
 
-export { detectMintFunction, detectPrice, autoGas, PRICE_READERS };
+export { PRICE_READERS, autoGas, detectMintFunction, detectPrice };

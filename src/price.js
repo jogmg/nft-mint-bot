@@ -1,11 +1,11 @@
 // price.js — price detection, parsing, and price protection for mint operations
 import { ethers } from "ethers";
-import { getProvider } from "./chains.js";
-import { detectSeadrop, getPublicDrop, getAllowlistRoot } from "./seadrop.js";
 import { checkAllowlist } from "./allowlist.js";
-import { getEligibleLists, pickBestList } from "./scatter.js";
-import { getDropStages, getEligibleOpenWindow } from "./opensea-drop.js";
+import { getProvider } from "./chains.js";
 import { getSessionCookies } from "./opensea-auth.js";
+import { getDropStages, getEligibleOpenWindow } from "./opensea-drop.js";
+import { getEligibleLists, pickBestList } from "./scatter.js";
+import { detectSeadrop, getAllowlistRoot, getPublicDrop } from "./seadrop.js";
 
 export const PRICE_READERS = [
   "function mintPrice() view returns (uint256)",
@@ -15,7 +15,6 @@ export const PRICE_READERS = [
   "function publicSalePrice() view returns (uint256)",
 ];
 
-// Probe standard price reader functions on a contract.
 export async function detectPrice(contract, provider, amount = 1) {
   for (const sig of PRICE_READERS) {
     try {
@@ -30,11 +29,6 @@ export async function detectPrice(contract, provider, amount = 1) {
   return null;
 }
 
-// Extract optional max price specification from command string.
-// Supports:
-//   --max-price 0.01 | --maxprice 0.01 | max:0.01 | max=0.01 | maxprice:0.01
-//   max:free | max:0 | max:0.05/unit | max:0.05total | max:any | max:unlimited
-//   p:0.01 | p=0.01
 export function extractMaxPriceSpec(input) {
   if (!input || typeof input !== "string")
     return { spec: null, rest: input || "" };
@@ -53,8 +47,6 @@ export function extractMaxPriceSpec(input) {
   return { spec: val.toLowerCase(), rest };
 }
 
-// Parse a price spec string into BigInt wei and human-readable formatting.
-// amount: number of tokens being minted.
 export function parsePriceSpec(spec, amount = 1) {
   if (!spec) return null;
   const s = String(spec).trim().toLowerCase();
@@ -103,7 +95,6 @@ export function parsePriceSpec(spec, amount = 1) {
   };
 }
 
-// Assert that actual price does not exceed max allowed price. Throws informative error.
 export function assertPriceProtection({
   actualPriceWei,
   maxPriceWei,
@@ -120,8 +111,6 @@ export function assertPriceProtection({
   }
 }
 
-// Resolve the current advertised price for a target across OpenSea, Seadrop, Scatter, or Generic.
-// Returns { priceWei, priceEth, unitPriceEth, currency, source } or null if unknown.
 export async function resolveTargetPrice(target, wallet) {
   const provider = getProvider(target.chain);
   const amount = target.amount || 1;

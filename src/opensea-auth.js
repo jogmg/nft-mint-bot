@@ -1,17 +1,3 @@
-// opensea-auth.js — automated OpenSea SIWE (Sign-In With Ethereum) login.
-//
-// OpenSea gates drop eligibility + signed-mint transaction building behind a
-// logged-in session (an `access_token` JWT cookie). Because we hold the wallet
-// private key we can perform the SIWE handshake headlessly and refresh it
-// automatically when the token nears expiry — no manual cookie pasting.
-//
-// Flow (reverse-engineered from the opensea.io web app):
-//   1. POST /__api/auth/siwe/nonce                 → { nonce } (+ __cf_bm cookie)
-//   2. build the EIP-4361 message, wallet.signMessage(it)
-//   3. POST /__api/auth/siwe/verify { message, signature, chainArch, connectorId }
-//                                                   → sets access_token cookie
-// The access_token is a JWT; we cache it per address and re-login when exp-60s
-// has passed.
 import { ethers } from "ethers";
 
 const BASE = "https://opensea.io/__api/auth";

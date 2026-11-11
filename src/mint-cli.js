@@ -6,13 +6,14 @@
 //   node src/mint-cli.js --when-open <url|contract> ...   (poll on-chain open time)
 //   node src/mint-cli.js --wallets all <url|contract> ... (multi-wallet; default single)
 import "dotenv/config";
+import { ethers } from "ethers";
+import { mintMany } from "./mint.js";
 import { parseTarget } from "./parse.js";
+import { extractMaxPriceSpec, parsePriceSpec } from "./price.js";
 import { resolveTarget } from "./resolve.js";
-import { mintOne, mintMany } from "./mint.js";
 import { mintAt, mintWhenOpen, parseWhen } from "./schedule.js";
 import { fmtDuration } from "./time.js";
 import { loadWallets, selectWallets } from "./wallets.js";
-import { extractMaxPriceSpec, parsePriceSpec } from "./price.js";
 
 function parseFlags(argv) {
   const out = {

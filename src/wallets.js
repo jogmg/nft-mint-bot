@@ -1,6 +1,6 @@
 // wallets.js — load & select minting wallets (optional multi-wallet)
-import { ethers } from 'ethers';
-import fs from 'node:fs';
+import { ethers } from "ethers";
+import fs from "node:fs";
 
 // Load all configured wallets, deduped by address, in priority order:
 //   1. PRIVATE_KEY            (primary, required for any minting)
@@ -10,25 +10,32 @@ export function loadWallets() {
   const list = [];
   const seen = new Set();
   const add = (pk) => {
-    if (!pk || typeof pk !== 'string') return;
+    if (!pk || typeof pk !== "string") return;
     let w;
-    try { w = new ethers.Wallet(pk.trim()); } catch { return; }
+    try {
+      w = new ethers.Wallet(pk.trim());
+    } catch {
+      return;
+    }
     if (seen.has(w.address)) return;
     seen.add(w.address);
     list.push(w);
   };
 
   add(process.env.PRIVATE_KEY);
-  (process.env.PRIVATE_KEYS || '').split(',').forEach(add);
+  (process.env.PRIVATE_KEYS || "").split(",").forEach(add);
 
-  const file = process.env.WALLETS_FILE || 'wallets.json';
+  const file = process.env.WALLETS_FILE || "wallets.json";
   try {
     if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const arr = Array.isArray(j) ? j : (j.wallets || []);
-      for (const e of arr) add(typeof e === 'string' ? e : (e.pk || e.privateKey));
+      const j = JSON.parse(fs.readFileSync(file, "utf8"));
+      const arr = Array.isArray(j) ? j : j.wallets || [];
+      for (const e of arr)
+        add(typeof e === "string" ? e : e.pk || e.privateKey);
     }
-  } catch { /* ignore malformed wallets file */ }
+  } catch {
+    /* ignore malformed wallets file */
+  }
 
   return list;
 }
@@ -39,14 +46,17 @@ export function loadWallets() {
 //   'N' (integer)         → first N wallets
 //   '1,3,4'               → 1-based indices
 export function selectWallets(all, spec) {
-  if (!all.length) throw new Error('no wallets loaded (set PRIVATE_KEY in .env)');
-  if (spec == null || spec === '') return [all[0]];
+  if (!all.length)
+    throw new Error("no wallets loaded (set PRIVATE_KEY in .env)");
+  if (spec == null || spec === "") return [all[0]];
 
   const s = String(spec).trim().toLowerCase();
-  if (s === 'all' || s === '*') return all;
-  if (/^\d+$/.test(s)) return all.slice(0, Math.max(1, Math.min(Number(s), all.length)));
+  if (s === "all" || s === "*") return all;
+  if (/^\d+$/.test(s))
+    return all.slice(0, Math.max(1, Math.min(Number(s), all.length)));
   if (/^[\d,\s]+$/.test(s)) {
-    const idx = s.split(',')
+    const idx = s
+      .split(",")
       .map((x) => Number(x.trim()) - 1)
       .filter((i) => Number.isInteger(i) && i >= 0 && i < all.length);
     if (idx.length) return idx.map((i) => all[i]);
@@ -60,14 +70,19 @@ export function selectWallets(all, spec) {
 // The bare `w` shorthand REQUIRES `:`/`=` (never a space) so trailing words
 // ending in "w" (e.g. ".../overview 10") aren't mistaken for a spec.
 export function extractWalletSpec(input) {
-  if (!input || typeof input !== 'string') return { spec: null, rest: input || '' };
-  const val = '(all|\\*|\\d+(?:\\s*,\\s*\\d+)*)';
+  if (!input || typeof input !== "string")
+    return { spec: null, rest: input || "" };
+  const val = "(all|\\*|\\d+(?:\\s*,\\s*\\d+)*)";
   // Full keyword: allows space/colon/equals. Bare `w`: colon/equals only.
-  const re = new RegExp(`(?:(?:^|(?<=\\s))--wallets|\\bwallets)[:=\\s]+${val}\\b|\\bw[:=]${val}\\b`, 'i');
+  const re = new RegExp(
+    `(?:(?:^|(?<=\\s))--wallets|\\bwallets)[:=\\s]+${val}\\b|\\bw[:=]${val}\\b`,
+    "i"
+  );
   const m = input.match(re);
   if (!m) return { spec: null, rest: input.trim() };
   const valMatch = m[1] || m[2];
   const rest = (input.slice(0, m.index) + input.slice(m.index + m[0].length))
-    .replace(/\s+/g, ' ').trim();
-  return { spec: valMatch.replace(/\s+/g, ''), rest };
+    .replace(/\s+/g, " ")
+    .trim();
+  return { spec: valMatch.replace(/\s+/g, ""), rest };
 }
