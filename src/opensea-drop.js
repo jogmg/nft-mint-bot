@@ -332,11 +332,12 @@ const SELECTOR_STAGE = {
 // distinguish "you're not eligible / out of allocation" (definitive) from
 // "drop not open yet" (retry later).
 const OS_ERROR_MEANINGS = {
-  InsufficientMintsRemainingError: "jatah mint habis (sudah mint maksimal)",
-  DropNotMintingError: "stage belum buka",
-  DropStageNotActiveError: "stage belum aktif",
-  NotEligibleError: "wallet tidak eligible",
-  InsufficientFundError: "saldo tidak cukup",
+  InsufficientMintsRemainingError:
+    "mint allocation exhausted (already minted the maximum)",
+  DropNotMintingError: "stage is not open yet",
+  DropStageNotActiveError: "stage is not active yet",
+  NotEligibleError: "wallet is not eligible",
+  InsufficientFundError: "insufficient balance",
 };
 
 export function explainOpenseaError(msg) {

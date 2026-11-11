@@ -18,6 +18,7 @@ Auto-detects the mint path across OpenSea Seadrop, OpenSea Drops (OS2), Scatter.
 ---
 
 ## 📖 Contents
+
 - [✨ Features](#-features)
 - [🎨 Platforms](#-platforms)
 - [🔗 Supported Chains](#-supported-chains)
@@ -35,52 +36,53 @@ Auto-detects the mint path across OpenSea Seadrop, OpenSea Drops (OS2), Scatter.
 ---
 
 ## ✨ Features
-| | Feature | Detail |
-|:--:|---------|--------|
-| 🎯 | **Auto-detect mint path** | Seadrop v1/v2, OpenSea Drops (OS2 relayer), Scatter.art, or generic ERC721/1155 (`mint`/`publicMint`/`claim`), probed via `eth_call` |
-| 💰 | **Auto price + gas** | Reads price on-chain; `estimateGas` +20% buffer, EIP-1559 with headroom (legacy fallback) |
-| 🧪 | **Simulate-first** | Every mint runs `eth_call` before broadcast — a reverting simulate never spends gas |
-| 🔐 | **Merkle allowlist** | Auto-fetches the tree, resolves per-wallet proof, mints `mintAllowList`; else falls back to public |
-| 🔏 | **OpenSea signed/GTD** | Automated SIWE login (headless, uses your key) → eligibility probe + server-built mint tx |
-| 🎫 | **Scatter.art** | Resolves eligible mint lists via public API (proof + signature server-built), ERC20 payment support |
-| 👀 | **Eligibility preview** | `/check` shows per-wallet eligibility, price/max, stages, project links + deployer |
-| 🕒 | **Scheduled + snipe** | `/mintat` fires at a time; `/mintopen` polls on-chain and mints the instant it opens |
-| 🛡️ | **Price protection** | `/mintopen` auto-locks initial price; aborts if creator raises price (bait-and-switch); supports `max:price` |
-| 🪙 | **Multi-wallet** | Fan one mint across many wallets concurrently (independent nonce + simulation) |
-| ⚡ | **Session pre-warm** | SIWE sessions cached & warmed during the wait so login never sits in the mint critical path |
-| 🔗 | **Auto-listener + shortcuts** | Bare URL/contract triggers `/check`; `/m` `/c` `/ma` `/mo` shortcuts |
-| 🖥️ | **Telegram + CLI** | Same engine behind an owner-guarded bot and a headless CLI |
+
+|     | Feature                       | Detail                                                                                                                               |
+| :-: | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 🎯  | **Auto-detect mint path**     | Seadrop v1/v2, OpenSea Drops (OS2 relayer), Scatter.art, or generic ERC721/1155 (`mint`/`publicMint`/`claim`), probed via `eth_call` |
+| 💰  | **Auto price + gas**          | Reads price on-chain; `estimateGas` +20% buffer, EIP-1559 with headroom (legacy fallback)                                            |
+| 🧪  | **Simulate-first**            | Every mint runs `eth_call` before broadcast — a reverting simulate never spends gas                                                  |
+| 🔐  | **Merkle allowlist**          | Auto-fetches the tree, resolves per-wallet proof, mints `mintAllowList`; else falls back to public                                   |
+| 🔏  | **OpenSea signed/GTD**        | Automated SIWE login (headless, uses your key) → eligibility probe + server-built mint tx                                            |
+| 🎫  | **Scatter.art**               | Resolves eligible mint lists via public API (proof + signature server-built), ERC20 payment support                                  |
+| 👀  | **Eligibility preview**       | `/check` shows per-wallet eligibility, price/max, stages, project links + deployer                                                   |
+| 🕒  | **Scheduled + snipe**         | `/mintat` fires at a time; `/mintopen` polls on-chain and mints the instant it opens                                                 |
+| 🛡️  | **Price protection**          | `/mintopen` auto-locks initial price; aborts if creator raises price (bait-and-switch); supports `max:price`                         |
+| 🪙  | **Multi-wallet**              | Fan one mint across many wallets concurrently (independent nonce + simulation)                                                       |
+| ⚡  | **Session pre-warm**          | SIWE sessions cached & warmed during the wait so login never sits in the mint critical path                                          |
+| 🔗  | **Auto-listener + shortcuts** | Bare URL/contract triggers `/check`; `/m` `/c` `/ma` `/mo` shortcuts                                                                 |
+| 🖥️  | **Telegram + CLI**            | Same engine behind an owner-guarded bot and a headless CLI                                                                           |
 
 ---
 
 ## 🎨 Platforms
 
-| Platform | How it mints | Eligibility |
-|----------|-------------|-------------|
-| **Seadrop v1/v2** (direct) | `mintPublic` / `mintAllowList` straight to the SeaDrop contract | merkle allowlist resolved on-chain, no login |
-| **OpenSea Drops (OS2)** | tx built server-side via GraphQL (relayer + `requestId`) | public no-login; signed/GTD via automated SIWE session |
-| **Scatter.art** | tx built via Scatter public API (proof + signature) | eligible mint lists per wallet, no API key |
-| **Generic ERC721/1155** | probes `mint`/`publicMint`/`claim` signatures | none (public) |
+| Platform                   | How it mints                                                    | Eligibility                                            |
+| -------------------------- | --------------------------------------------------------------- | ------------------------------------------------------ |
+| **Seadrop v1/v2** (direct) | `mintPublic` / `mintAllowList` straight to the SeaDrop contract | merkle allowlist resolved on-chain, no login           |
+| **OpenSea Drops (OS2)**    | tx built server-side via GraphQL (relayer + `requestId`)        | public no-login; signed/GTD via automated SIWE session |
+| **Scatter.art**            | tx built via Scatter public API (proof + signature)             | eligible mint lists per wallet, no API key             |
+| **Generic ERC721/1155**    | probes `mint`/`publicMint`/`claim` signatures                   | none (public)                                          |
 
 ---
 
 ## 🔗 Supported Chains
 
-| Chain | Key | chainId | Explorer |
-|-------|-----|:-------:|----------|
-| Ethereum | `ethereum` | `1` | etherscan.io |
-| Base | `base` | `8453` | basescan.org |
-| Polygon | `polygon` | `137` | polygonscan.com |
-| Arbitrum | `arbitrum` | `42161` | arbiscan.io |
-| Optimism | `optimism` | `10` | optimistic.etherscan.io |
-| Zora | `zora-network` | `7777777` | explorer.zora.energy |
-| BNB Chain | `bsc` | `56` | bscscan.com |
-| Avalanche | `avalanche` | `43114` | snowtrace.io |
-| Berachain | `bera` | `80094` | berascan.com |
-| peaq | `peaq` | `3338` | peaq.subscan.io |
-| **Robinhood** | `robinhood` | `4663` | robinhoodchain.blockscout.com |
-| Ink | `ink` | `57073` | explorer.inkonchain.com |
-| Arc | `arc` | `5042` | explorer.arc.io |
+| Chain         | Key            |  chainId  | Explorer                      |
+| ------------- | -------------- | :-------: | ----------------------------- |
+| Ethereum      | `ethereum`     |    `1`    | etherscan.io                  |
+| Base          | `base`         |  `8453`   | basescan.org                  |
+| Polygon       | `polygon`      |   `137`   | polygonscan.com               |
+| Arbitrum      | `arbitrum`     |  `42161`  | arbiscan.io                   |
+| Optimism      | `optimism`     |   `10`    | optimistic.etherscan.io       |
+| Zora          | `zora-network` | `7777777` | explorer.zora.energy          |
+| BNB Chain     | `bsc`          |   `56`    | bscscan.com                   |
+| Avalanche     | `avalanche`    |  `43114`  | snowtrace.io                  |
+| Berachain     | `bera`         |  `80094`  | berascan.com                  |
+| peaq          | `peaq`         |  `3338`   | peaq.subscan.io               |
+| **Robinhood** | `robinhood`    |  `4663`   | robinhoodchain.blockscout.com |
+| Ink           | `ink`          |  `57073`  | explorer.inkonchain.com       |
+| Arc           | `arc`          |  `5042`   | explorer.arc.io               |
 
 > Every RPC is overridable with an `RPC_*` env var — see [`.env.example`](.env.example).
 
@@ -99,16 +101,16 @@ cp .env.example .env      # then fill in the required values
 <details>
 <summary><b>Environment variables</b></summary>
 
-| Var | Required | Purpose |
-|-----|:--------:|---------|
-| `TELEGRAM_BOT_TOKEN` | ✅ (bot) | Bot token from `@BotFather` |
-| `ALLOWED_USER_IDS` | — | Comma-separated Telegram IDs allowed to command the bot. Empty = deny all |
-| `PRIVATE_KEY` | ✅ | Primary minting wallet |
-| `PRIVATE_KEYS` | — | Extra wallets, comma-separated private keys |
-| `WALLETS_FILE` | — | JSON wallets file path (`wallets.json`) |
-| `OPENSEA_KEY` | — | OpenSea REST v2 key — enables slug resolution + project links (website/socials) |
-| `RPC_*` | — | Per-chain RPC overrides |
-| `OS_HASH_*` | — | Override OpenSea persisted-query hashes if the frontend redeploys (`OS_HASH_MINT_MODULE`, `OS_HASH_MINT_TIMELINE`, `OS_HASH_DROP_ELIGIBILITY`, `OS_HASH_MINT_QUERY`) |
+| Var                  | Required | Purpose                                                                                                                                                              |
+| -------------------- | :------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN` | ✅ (bot) | Bot token from `@BotFather`                                                                                                                                          |
+| `ALLOWED_USER_IDS`   |    —     | Comma-separated Telegram IDs allowed to command the bot. Empty = deny all                                                                                            |
+| `PRIVATE_KEY`        |    ✅    | Primary minting wallet                                                                                                                                               |
+| `PRIVATE_KEYS`       |    —     | Extra wallets, comma-separated private keys                                                                                                                          |
+| `WALLETS_FILE`       |    —     | JSON wallets file path (`wallets.json`)                                                                                                                              |
+| `OPENSEA_KEY`        |    —     | OpenSea REST v2 key — enables slug resolution + project links (website/socials)                                                                                      |
+| `RPC_*`              |    —     | Per-chain RPC overrides                                                                                                                                              |
+| `OS_HASH_*`          |    —     | Override OpenSea persisted-query hashes if the frontend redeploys (`OS_HASH_MINT_MODULE`, `OS_HASH_MINT_TIMELINE`, `OS_HASH_DROP_ELIGIBILITY`, `OS_HASH_MINT_QUERY`) |
 
 </details>
 
@@ -121,16 +123,17 @@ npm run bot
 ---
 
 ## 🎮 Bot Commands
-| Command | Shortcut | Action |
-|---------|:--------:|--------|
-| `/mint <target> [wallets:all\|N] [max:price]` | `/m` | detect → simulate → send → report |
-| `/mintat <time> \| <target> [wallets:all\|N] [max:price]` | `/ma` | schedule a mint for a time |
-| `/mintopen <target> [wallets:all\|N] [max:price]` | `/mo` | poll on-chain open, mint the instant it opens (auto-locks price) |
-| `/check <target> [wallets:all\|N]` | `/c` | **dry run** — config, price, stages, per-wallet eligibility, links |
-| `/jobs` | — | list scheduled / running jobs |
-| `/cancel <id>` | — | cancel a scheduled or watching job |
-| `/wallet` | — | list loaded wallets + non-zero balances per chain |
-| `/help` | — | command reference |
+
+| Command                                                   | Shortcut | Action                                                             |
+| --------------------------------------------------------- | :------: | ------------------------------------------------------------------ |
+| `/mint <target> [wallets:all\|N] [max:price]`             |   `/m`   | detect → simulate → send → report                                  |
+| `/mintat <time> \| <target> [wallets:all\|N] [max:price]` |  `/ma`   | schedule a mint for a time                                         |
+| `/mintopen <target> [wallets:all\|N] [max:price]`         |  `/mo`   | poll on-chain open, mint the instant it opens (auto-locks price)   |
+| `/check <target> [wallets:all\|N]`                        |   `/c`   | **dry run** — config, price, stages, per-wallet eligibility, links |
+| `/jobs`                                                   |    —     | list scheduled / running jobs                                      |
+| `/cancel <id>`                                            |    —     | cancel a scheduled or watching job                                 |
+| `/wallet`                                                 |    —     | list loaded wallets + non-zero balances per chain                  |
+| `/help`                                                   |    —     | command reference                                                  |
 
 > **Auto-listener:** send a bare OpenSea/Scatter URL or `0x…` contract (no command) and the bot auto-runs `/check`.
 
@@ -139,14 +142,81 @@ npm run bot
 <details>
 <summary><b>Time formats for <code>/mintat</code></b></summary>
 
-| Format | Example |
-|--------|---------|
-| ISO 8601 | `2026-08-12T14:00:00` |
-| Unix | `1786000000` (s or ms) |
-| Relative | `in 5m`, `30s`, `2h`, `1d` |
-| Clock (next occurrence) | `HH:MM` |
+| Format                  | Example                    |
+| ----------------------- | -------------------------- |
+| ISO 8601                | `2026-08-12T14:00:00`      |
+| Unix                    | `1786000000` (s or ms)     |
+| Relative                | `in 5m`, `30s`, `2h`, `1d` |
+| Clock (next occurrence) | `HH:MM`                    |
 
-All times displayed by the bot are **WIB**. The `|` separator splits the time from the target, because a time can contain spaces.
+Display times follow the configured `TIMEZONE` environment variable when set. If `TIMEZONE` is not present, the bot uses the local machine timezone; if that is unavailable, it falls back to `UTC`. The `|` separator splits the time from the target, because a time can contain spaces.
+
+Timezone selector examples:
+
+```bash
+# UTC / Global
+TIMEZONE=UTC
+TIMEZONE=Etc/UTC
+
+# Africa
+TIMEZONE=Africa/Cairo
+TIMEZONE=Africa/Lagos
+TIMEZONE=Africa/Johannesburg
+TIMEZONE=Africa/Nairobi
+TIMEZONE=Africa/Kampala
+TIMEZONE=Africa/Dar_es_Salaam
+
+# North America
+TIMEZONE=America/New_York
+TIMEZONE=America/Los_Angeles
+TIMEZONE=America/Chicago
+TIMEZONE=America/Denver
+TIMEZONE=America/Phoenix
+TIMEZONE=America/Toronto
+TIMEZONE=America/Mexico_City
+
+# South America
+TIMEZONE=America/Sao_Paulo
+TIMEZONE=America/Buenos_Aires
+TIMEZONE=America/Santiago
+
+# Europe
+TIMEZONE=Europe/London
+TIMEZONE=Europe/Paris
+TIMEZONE=Europe/Berlin
+TIMEZONE=Europe/Madrid
+TIMEZONE=Europe/Rome
+TIMEZONE=Europe/Athens
+TIMEZONE=Europe/Istanbul
+TIMEZONE=Europe/Moscow
+TIMEZONE=Europe/Amsterdam
+
+# Asia
+TIMEZONE=Asia/Dubai
+TIMEZONE=Asia/Kolkata
+TIMEZONE=Asia/Singapore
+TIMEZONE=Asia/Tokyo
+TIMEZONE=Asia/Seoul
+TIMEZONE=Asia/Jakarta
+TIMEZONE=Asia/Bangkok
+TIMEZONE=Asia/Hong_Kong
+TIMEZONE=Asia/Shanghai
+TIMEZONE=Asia/Kuala_Lumpur
+TIMEZONE=Asia/Manila
+
+# Oceania
+TIMEZONE=Australia/Sydney
+TIMEZONE=Australia/Melbourne
+TIMEZONE=Pacific/Auckland
+TIMEZONE=Pacific/Fiji
+```
+
+Select one of these values in a `.env` file or shell session:
+
+```bash
+# .env example
+TIMEZONE=Asia/Jakarta
+```
 
 </details>
 
@@ -209,13 +279,13 @@ Resolves the wallet's eligible mint lists (`eligible-invite-lists`), picks the b
 👤 deployer: 0xc7f55cE6…7AA6
 📦 supply: 10,000 (sold out)
 
-🎬 Stages (WIB)
-  🎫 stage 1: GTD · FREE · max 5 · 🟢 buka
-  🌐 stage 0: Public stage · 0.0003 ETH · max 20 · 🟢 buka
+🎬 Stages (WAT)
+  🎫 stage 1: GTD · FREE · max 5 · 🟢 open
+  🌐 stage 0: Public stage · 0.0003 ETH · max 20 · 🟢 open
 
 ━━━━━━━━━━━━━━━━━━━━
 👛 Eligibility — 1 wallet
-✅ 0x5e4bD635…  ELIGIBLE — bisa mint sekarang · 0.0003 ETH
+✅ 0x5e4bD635…  ELIGIBLE — can mint now · 0.0003 ETH
 ```
 
 > ⚠️ **Honest limits:** No on-chain mint has yet been confirmed end-to-end — paths are tested up to tx-build + auth-accepted. OpenSea signed/GTD auth is verified (mint resolver processes authed requests), but a signed tx landing on-chain is unproven. `mintAllowedTokenHolder` (token-gated) falls back to public. If an RPC caps `getLogs` range, merkle event lookup may false-negative (never crashes).
@@ -238,12 +308,12 @@ Wallets are deduped by address.
 
 **2. Select per command** with the wallet spec (default: primary only):
 
-| Spec | Selects |
-|------|---------|
-| `wallets:all` / `wallets:*` | all wallets |
-| `wallets:3` | first 3 wallets |
-| `wallets:1,2` | specific indices (1-based) |
-| `--wallets all` / `-w 3` | CLI form |
+| Spec                        | Selects                    |
+| --------------------------- | -------------------------- |
+| `wallets:all` / `wallets:*` | all wallets                |
+| `wallets:3`                 | first 3 wallets            |
+| `wallets:1,2`               | specific indices (1-based) |
+| `--wallets all` / `-w 3`    | CLI form                   |
 
 > The bare `w` shorthand **requires** `:`/`=` (`w:2`) — never a space — so a target like `.../overview 10` is not mistaken for a spec.
 
@@ -288,20 +358,21 @@ When using `/mintopen` or `--when-open`, drops initially announced as cheap or *
 
 ## 🧩 Input Shapes
 
-| Input | Example |
-|-------|---------|
-| OpenSea collection URL | `https://opensea.io/collection/toadlings` |
-| OpenSea assets URL | `https://opensea.io/assets/base/0xABC.../5` |
-| Scatter.art URL | `https://scatter.art/c/<slug>` · `/collection/<slug>` |
-| Zora collect URL | `https://zora.co/collect/base:0xABC.../1` |
-| Direct contract | `0xABC... on base 5` |
-| Amount syntax | trailing `N` or `xN` anywhere (`0xABC base x10`) |
+| Input                  | Example                                               |
+| ---------------------- | ----------------------------------------------------- |
+| OpenSea collection URL | `https://opensea.io/collection/toadlings`             |
+| OpenSea assets URL     | `https://opensea.io/assets/base/0xABC.../5`           |
+| Scatter.art URL        | `https://scatter.art/c/<slug>` · `/collection/<slug>` |
+| Zora collect URL       | `https://zora.co/collect/base:0xABC.../1`             |
+| Direct contract        | `0xABC... on base 5`                                  |
+| Amount syntax          | trailing `N` or `xN` anywhere (`0xABC base x10`)      |
 
 > Chain and amount after a direct address are **order-independent**; `on` is filler. In an OpenSea assets URL, a trailing `/5` is the **tokenId**, not the amount. Defaults: amount = `1`, chain = `ethereum`.
 
 ---
 
 ## ⚙️ Detection Pipeline
+
 ```
 parse → resolve (slug/URL/contract)
   ├─ Scatter    → API: eligible lists → build tx (proof + signature)

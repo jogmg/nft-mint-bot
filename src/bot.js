@@ -10,34 +10,65 @@
 //   /cancel <id>                             — cancel a scheduled job
 //   /wallet                                  — show wallet address + balances
 //   /help
-import 'dotenv/config';
-import TelegramBot from 'node-telegram-bot-api';
-import { ethers } from 'ethers';
-import { parseTarget } from './parse.js';
-import { resolveTarget } from './resolve.js';
-import { mintOne, mintMany, detectMintFunction, detectPrice } from './mint.js';
-import { extractMaxPriceSpec, parsePriceSpec, resolveTargetPrice } from './price.js';
-import { detectSeadrop, getPublicDrop, getAllowlistRoot, getMintMechanisms, tokenStatus } from './seadrop.js';
-import { checkAllowlist } from './allowlist.js';
-import { getEligibleLists, pickBestList } from './scatter.js';
-import { getDropStages, getDropEligibility, getCollectionMeta, getEligibleOpenWindow } from './opensea-drop.js';
-import { getSessionCookies } from './opensea-auth.js';
-import { getProvider, CHAIN_IDS, explorerUrl } from './chains.js';
-import { mintAt, mintWhenOpen, parseWhen, resolveOpenTime } from './schedule.js';
-import { loadWallets, selectWallets, extractWalletSpec } from './wallets.js';
-import { fmtWIB, fmtDuration } from './time.js';
+import "dotenv/config";
+import TelegramBot from "node-telegram-bot-api";
+import { ethers } from "ethers";
+import { parseTarget } from "./parse.js";
+import { resolveTarget } from "./resolve.js";
+import { mintOne, mintMany, detectMintFunction, detectPrice } from "./mint.js";
+import {
+  extractMaxPriceSpec,
+  parsePriceSpec,
+  resolveTargetPrice,
+} from "./price.js";
+import {
+  detectSeadrop,
+  getPublicDrop,
+  getAllowlistRoot,
+  getMintMechanisms,
+  tokenStatus,
+} from "./seadrop.js";
+import { checkAllowlist } from "./allowlist.js";
+import { getEligibleLists, pickBestList } from "./scatter.js";
+import {
+  getDropStages,
+  getDropEligibility,
+  getCollectionMeta,
+  getEligibleOpenWindow,
+} from "./opensea-drop.js";
+import { getSessionCookies } from "./opensea-auth.js";
+import { getProvider, CHAIN_IDS, explorerUrl } from "./chains.js";
+import {
+  mintAt,
+  mintWhenOpen,
+  parseWhen,
+  resolveOpenTime,
+} from "./schedule.js";
+import { loadWallets, selectWallets, extractWalletSpec } from "./wallets.js";
+import { fmtWAT, fmtDuration } from "./time.js";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-if (!TOKEN) { console.error('[FAIL] TELEGRAM_BOT_TOKEN not set'); process.exit(1); }
-if (!process.env.PRIVATE_KEY) { console.error('[FAIL] PRIVATE_KEY not set'); process.exit(1); }
+if (!TOKEN) {
+  console.error("[FAIL] TELEGRAM_BOT_TOKEN not set");
+  process.exit(1);
+}
+if (!process.env.PRIVATE_KEY) {
+  console.error("[FAIL] PRIVATE_KEY not set");
+  process.exit(1);
+}
 
 // Owner allowlist: comma-separated Telegram user IDs. Empty = deny all (safe default).
-const ALLOWED = (process.env.ALLOWED_USER_IDS || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
+const ALLOWED = (process.env.ALLOWED_USER_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const WALLETS = loadWallets();
 const wallet = WALLETS[0];
-if (!wallet) { console.error('[FAIL] no wallets loaded (set PRIVATE_KEY in .env)'); process.exit(1); }
+if (!wallet) {
+  console.error("[FAIL] no wallets loaded (set PRIVATE_KEY in .env)");
+  process.exit(1);
+}
 // dropPendingUpdates: ignore the backlog Telegram queued while the bot was
 // offline (or from a previous deployment sharing this token), so stale/foreign
 // commands aren't processed on start.
@@ -71,7 +102,10 @@ function isAllowed(msg) {
 function guard(handler) {
   return async (msg, match) => {
     if (!isAllowed(msg)) {
-      await safeSend(msg.chat.id, `⛔ Not authorized. Your ID: ${msg.from?.id}`);
+      await safeSend(
+        msg.chat.id,
+        `⛔ Not authorized. Your ID: ${msg.from?.id}`
+      );
       return;
     }
     try {
@@ -88,79 +122,135 @@ let jobSeq = 0;
 
 function addJob(meta) {
   const id = String(++jobSeq);
-  jobs.set(id, { id, controller: new AbortController(), createdAt: Date.now(), ...meta });
+  jobs.set(id, {
+    id,
+    controller: new AbortController(),
+    createdAt: Date.now(),
+    ...meta,
+  });
   return jobs.get(id);
 }
 
 function fmtJob(j) {
-  const when = j.whenUnix ? fmtWIB(j.whenUnix) : (j.mode === 'open' ? '⚡ saat buka' : '—');
-  const w = j.wallets > 1 ? ` · ${j.wallets}w` : '';
-  const p = j.maxPriceWei != null ? ` · 🛡 max ${ethers.formatEther(j.maxPriceWei)} ETH` : '';
-  const dot = j.status === 'running' ? '🟢' : j.status === 'WIBfmtWIBching' ? '👀' : j.status === 'done' ? '✅' : j.status === 'failed' ? '❌' : '⚪';
-  return `${dot} *#${j.id}* ${j.mode} — \`${j.contract.slice(0, 8)}…\` × ${j.amount}${w}${p}\n     ${j.chain} · ${when} · _${j.status}_`;
+  const when = j.whenUnix
+    ? fmtWAT(j.whenUnix)
+    : j.mode === "open"
+    ? "⚡ at open time"
+    : "—";
+  const w = j.wallets > 1 ? ` · ${j.wallets}w` : "";
+  const p =
+    j.maxPriceWei != null
+      ? ` · 🛡 max ${ethers.formatEther(j.maxPriceWei)} ETH`
+      : "";
+  const dot =
+    j.status === "running"
+      ? "🟢"
+      : j.status === "watching"
+      ? "👀"
+      : j.status === "done"
+      ? "✅"
+      : j.status === "failed"
+      ? "❌"
+      : "⚪";
+  return `${dot} *#${j.id}* ${j.mode} — \`${j.contract.slice(0, 8)}…\` × ${
+    j.amount
+  }${w}${p}\n     ${j.chain} · ${when} · _${j.status}_`;
 }
 
-bot.onText(/^\/start$|^\/help$/, guard(async (msg) => {
-  await bot.sendMessage(msg.chat.id, [
-    '🤖 *NFT MINTER BOT*',
-    '━━━━━━━━━━━━━━━━━━━━',
-    '',
-    '⚡ *Mint*',
-    '`/mint` (`/m`) `<url|contract> [chain] [amount] [max:price]` — mint now',
-    '`/mintat` (`/ma`) `<time> | <target> … [max:price]` — scheduled mint',
-    '`/mintopen` (`/mo`) `<target> … [max:price]` — mint when it opens',
-    '',
-    '🛡 *Price Protection* (prevents bait-and-switch / price hikes)',
-    '   `max:0.01` · `max:free` · `max:0.05total` · `max:any` (unlimited)',
-    '   _Default in /mintopen: auto-locks to the initial detected price._',
-    '',
-    '🔍 *Info & Job*',
-    '`/check` (`/c`) `<target>` — check drop + eligibility (no send)',
-    '`/jobs` · `/cancel <id>` — manage scheduled jobs',
-    '`/wallet` — wallet list + balances',
-    '',
-    '⏱ *Time*  ISO `2026-08-12T14:00`, unix, `in 5m`, `30s`, `2h`, `HH:MM` (WIBfmtWIBfmtWIB)',
-    '👛 *Wallets*  default primary. `wallets:all` · `wallets:3` · `wallets:1,2`',
-    '',
-    '🔗 *Chains*  ethereum · base · polygon · arbitrum · optimism · zora · bsc · avalanche · bera · peaq · robinhood · ink · arc',
-    '🧠 Auto-detect: mint fn · price · gas · Seadrop v1/v2 · allowlist',
-  ].join('\n'), { parse_mode: 'Markdown' });
-}));
+bot.onText(
+  /^\/start$|^\/help$/,
+  guard(async (msg) => {
+    await bot.sendMessage(
+      msg.chat.id,
+      [
+        "🤖 *NFT MINTER BOT*",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "⚡ *Mint*",
+        "`/mint` (`/m`) `<url|contract> [chain] [amount] [max:price]` — mint now",
+        "`/mintat` (`/ma`) `<time> | <target> … [max:price]` — scheduled mint",
+        "`/mintopen` (`/mo`) `<target> … [max:price]` — mint when it opens",
+        "",
+        "🛡 *Price Protection* (prevents bait-and-switch / price hikes)",
+        "   `max:0.01` · `max:free` · `max:0.05total` · `max:any` (unlimited)",
+        "   _Default in /mintopen: auto-locks to the initial detected price._",
+        "",
+        "🔍 *Info & Job*",
+        "`/check` (`/c`) `<target>` — check drop + eligibility (no send)",
+        "`/jobs` · `/cancel <id>` — manage scheduled jobs",
+        "`/wallet` — wallet list + balances",
+        "",
+        "⏱ *Time*  ISO `2026-08-12T14:00`, unix, `in 5m`, `30s`, `2h`, `HH:MM` (WAT)",
+        "👛 *Wallets*  default primary. `wallets:all` · `wallets:3` · `wallets:1,2`",
+        "",
+        "🔗 *Chains*  ethereum · base · polygon · arbitrum · optimism · zora · bsc · avalanche · bera · peaq · robinhood · ink · arc",
+        "🧠 Auto-detect: mint fn · price · gas · Seadrop v1/v2 · allowlist",
+      ].join("\n"),
+      { parse_mode: "Markdown" }
+    );
+  })
+);
 
-bot.onText(/^\/wallet$/, guard(async (msg) => {
-  const chains = Object.keys(CHAIN_IDS);
-  const lines = [`👛 *WALLETS — ${WALLETS.length}*`, '━━━━━━━━━━━━━━━━━━━━', ''];
-  for (let i = 0; i < WALLETS.length; i++) {
-    const w = WALLETS[i];
-    const bals = await Promise.allSettled(chains.map(async (chain) => {
-      const bal = await getProvider(chain).getBalance(w.address);
-      return { chain, bal };
-    }));
-    // Only show chains with a non-zero balance to keep it compact.
-    const nonzero = bals
-      .filter((r) => r.status === 'fulfilled' && r.value.bal > 0n)
-      .map((r) => `${r.value.chain} *${ethers.formatEther(r.value.bal)}*`);
-    const label = i === 0 ? ' 🔑 primary' : '';
-    lines.push(`*${i + 1}.*${label} \`${w.address}\``);
-    lines.push(`     💰 ${nonzero.length ? nonzero.join('  ·  ') : '_balance 0 on all chains_'}`, '');
-  }
-  await bot.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown' });
-}));
+bot.onText(
+  /^\/wallet$/,
+  guard(async (msg) => {
+    const chains = Object.keys(CHAIN_IDS);
+    const lines = [
+      `👛 *WALLETS — ${WALLETS.length}*`,
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+    ];
+    for (let i = 0; i < WALLETS.length; i++) {
+      const w = WALLETS[i];
+      const bals = await Promise.allSettled(
+        chains.map(async (chain) => {
+          const bal = await getProvider(chain).getBalance(w.address);
+          return { chain, bal };
+        })
+      );
+      // Only show chains with a non-zero balance to keep it compact.
+      const nonzero = bals
+        .filter((r) => r.status === "fulfilled" && r.value.bal > 0n)
+        .map((r) => `${r.value.chain} *${ethers.formatEther(r.value.bal)}*`);
+      const label = i === 0 ? " 🔑 primary" : "";
+      lines.push(`*${i + 1}.*${label} \`${w.address}\``);
+      lines.push(
+        `     💰 ${
+          nonzero.length ? nonzero.join("  ·  ") : "_balance 0 on all chains_"
+        }`,
+        ""
+      );
+    }
+    await bot.sendMessage(msg.chat.id, lines.join("\n"), {
+      parse_mode: "Markdown",
+    });
+  })
+);
 
 // Format token supply compactly (e.g. "10,000 (sold out)", "10,000 (3,500 minted)", "10,000").
 function fmtSupply(maxSup, totalSup) {
   let max = null;
   let tot = null;
-  try { if (maxSup != null) max = BigInt(maxSup); } catch { /* ignore */ }
-  try { if (totalSup != null) tot = BigInt(totalSup); } catch { /* ignore */ }
+  try {
+    if (maxSup != null) max = BigInt(maxSup);
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (totalSup != null) tot = BigInt(totalSup);
+  } catch {
+    /* ignore */
+  }
   if (max == null && tot == null) return null;
   if (max != null && tot != null) {
-    return (max > 0n && tot >= max)
-      ? `${max.toLocaleString('en-US')} (sold out)`
-      : `${max.toLocaleString('en-US')} (${tot.toLocaleString('en-US')} minted)`;
+    return max > 0n && tot >= max
+      ? `${max.toLocaleString("en-US")} (sold out)`
+      : `${max.toLocaleString("en-US")} (${tot.toLocaleString(
+          "en-US"
+        )} minted)`;
   }
-  if (max != null) return `${max.toLocaleString('en-US')}`;
-  return `${tot.toLocaleString('en-US')} minted`;
+  if (max != null) return `${max.toLocaleString("en-US")}`;
+  return `${tot.toLocaleString("en-US")} minted`;
 }
 
 // Run the collection-check flow for a raw target string (used by /check and by
@@ -173,15 +263,15 @@ async function runCheck(msg, rawInput) {
   const amount = target.amount || 1;
 
   const lines = [
-    '🔍 *COLLECTION CHECK*',
-    '━━━━━━━━━━━━━━━━━━━━',
+    "🔍 *COLLECTION CHECK*",
+    "━━━━━━━━━━━━━━━━━━━━",
     `📄 \`${target.contract}\``,
     `🔗 ${target.chain}  ·  🎯 mint × ${amount}`,
-    '',
+    "",
   ];
 
   // OpenSea Drops (OS2): list drop stages; note the relayer/GraphQL mint path.
-  if (target.source === 'opensea' && target.slug) {
+  if (target.source === "opensea" && target.slug) {
     const drop = await getDropStages(target.slug).catch(() => null);
     if (drop && drop.stages.length) {
       const now = Math.floor(Date.now() / 1000);
@@ -190,42 +280,60 @@ async function runCheck(msg, rawInput) {
         tokenStatus(target.contract, provider).catch(() => null),
       ]);
       const title = meta?.name || target.slug;
-      lines.push(`⚙️  *OpenSea Drop* — ${title}${meta?.verified ? ' ✔️' : ''}`);
+      lines.push(`⚙️  *OpenSea Drop* — ${title}${meta?.verified ? " ✔️" : ""}`);
       const links = [];
       if (meta?.website) links.push(`[Website](${meta.website})`);
       if (meta?.twitter) links.push(`[Twitter](${meta.twitter})`);
       if (meta?.discord) links.push(`[Discord](${meta.discord})`);
       if (meta?.telegram) links.push(`[Telegram](${meta.telegram})`);
-      links.push(`[explorer](${explorerUrl(target.chain, '').replace(/\/tx\/$/, '/address/') + target.contract})`);
-      lines.push(`🔗 ${links.join('  ·  ')}`);
+      links.push(
+        `[explorer](${
+          explorerUrl(target.chain, "").replace(/\/tx\/$/, "/address/") +
+          target.contract
+        })`
+      );
+      lines.push(`🔗 ${links.join("  ·  ")}`);
       if (meta?.owner) {
-        const oUrl = explorerUrl(target.chain, '').replace(/\/tx\/$/, '/address/') + meta.owner;
-        lines.push(`👤 deployer: [${meta.owner.slice(0, 10)}…${meta.owner.slice(-4)}](${oUrl})`);
+        const oUrl =
+          explorerUrl(target.chain, "").replace(/\/tx\/$/, "/address/") +
+          meta.owner;
+        lines.push(
+          `👤 deployer: [${meta.owner.slice(0, 10)}…${meta.owner.slice(
+            -4
+          )}](${oUrl})`
+        );
       }
       const maxSup = st?.maxSupply ?? meta?.totalSupply ?? null;
       const supText = fmtSupply(maxSup, st?.totalSupply);
       if (supText) lines.push(`📦 supply: ${supText}`);
-      lines.push('', '🎬 *Stages (WIBfmtWIBfmtWIB)*');
+      lines.push("", "🎬 *Stages (WAT)*");
       for (const s of drop.stages) {
-        const price = s.priceUnit ? `${s.priceUnit} ${s.symbol}` : 'FREE';
-        const when = s.startTime ? (s.startTime > now ? fmtWIB(s.startTime) : '*🟢 BUKA*') : '—';
+        const price = s.priceUnit ? `${s.priceUnit} ${s.symbol}` : "FREE";
+        const when = s.startTime
+          ? s.startTime > now
+            ? fmtWAT(s.startTime)
+            : "*🟢 OPEN*"
+          : "—";
         // MintModuleQuery does not return stageType (that's auth-gated in
         // DropEligibilityQuery), so infer the icon from stageType when present,
         // else from the label text (Public / GTD / presale / allowlist).
-        const lbl = (s.label || '').toLowerCase();
+        const lbl = (s.label || "").toLowerCase();
         let tag;
-        if (s.stageType === 'PUBLIC_SALE' || /public/.test(lbl)) tag = '🌐';
-        else if (s.stageType === 'SIGNED_PRESALE' || /presale|signed/.test(lbl)) tag = '🔏';
-        else if (/gtd|allowlist|allow list|holder|wl\b|whitelist/.test(lbl)) tag = '🎫';
-        else tag = '•';
+        if (s.stageType === "PUBLIC_SALE" || /public/.test(lbl)) tag = "🌐";
+        else if (s.stageType === "SIGNED_PRESALE" || /presale|signed/.test(lbl))
+          tag = "🔏";
+        else if (/gtd|allowlist|allow list|holder|wl\b|whitelist/.test(lbl))
+          tag = "🎫";
+        else tag = "•";
         // Two-line card: header (icon · name · access stats), footer (price ·
         // max · window). Keeps long labels/timestamps from wrapping mid-token.
         const access = [];
         if (s.maxPerWallet != null) access.push(`max ${s.maxPerWallet}/wallet`);
-        if (s.allowlistMemberCount != null) access.push(`👥 ${s.allowlistMemberCount}`);
+        if (s.allowlistMemberCount != null)
+          access.push(`👥 ${s.allowlistMemberCount}`);
         lines.push(
           `${tag} *${s.label || `stage ${s.stageIndex}`}*`,
-          `   ${price}  ·  ${access.join('  ·  ') || 'tanpa batas'}  ·  ${when}`,
+          `   ${price}  ·  ${access.join("  ·  ") || "no limit"}  ·  ${when}`
         );
       }
       // Per-wallet eligibility via DropEligibilityQuery (authed session with the
@@ -234,51 +342,90 @@ async function runCheck(msg, rawInput) {
       // stageIndex → real stage label from MintModuleQuery ("GTD c00l", "FCFS
       // c00l", …). DropEligibilityQuery has no label field; both queries key
       // the same drop stages, so join here (same approach as getEligibleOpenWindow).
-      const stageLabels = new Map(drop.stages.map((s) => [String(s.stageIndex), s.label]));
-      lines.push('', '━━━━━━━━━━━━━━━━━━━━', `👛 *Eligibility — ${chosen.length} wallet*`);
+      const stageLabels = new Map(
+        drop.stages.map((s) => [String(s.stageIndex), s.label])
+      );
+      lines.push(
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        `👛 *Eligibility — ${chosen.length} wallet*`
+      );
       for (const w of chosen) {
         try {
           const cookie = await getSessionCookies(w.connect(provider));
           const elig = await getDropEligibility(target.slug, w.address, cookie);
           if (!elig || !elig.authed) {
-            lines.push(`⚠️ \`${w.address.slice(0, 10)}…\`  eligibility tak terbaca (login OK, resolver null)`);
+            lines.push(
+              `⚠️ \`${w.address.slice(
+                0,
+                10
+              )}…\`  eligibility unreadable (login OK, resolver null)`
+            );
             continue;
           }
           const ok = elig.stages.filter((s) => s.isEligible);
           // Drop-wide wallet stats (new OpenSea accountStageEligibility data).
           const stats = [];
-          if (elig.allowlistedWalletCount != null) stats.push(`👥 ${elig.allowlistedWalletCount} wallet di allowlist`);
-          if (elig.walletCount != null) stats.push(`📋 ${elig.walletCount} wallet terlacak`);
-          if (stats.length) lines.push(`   ${stats.join('  ·  ')}`);
+          if (elig.allowlistedWalletCount != null)
+            stats.push(
+              `👥 ${elig.allowlistedWalletCount} wallets on allowlist`
+            );
+          if (elig.walletCount != null)
+            stats.push(`📋 ${elig.walletCount} wallets tracked`);
+          if (stats.length) lines.push(`   ${stats.join("  ·  ")}`);
           if (ok.length) {
             const parts = ok.map((s) => {
               // Prefer the drop's own stage name; fall back to the type bucket.
-              const label = stageLabels.get(String(s.stageIndex))
-                || (s.stageType === 'PUBLIC_SALE' ? 'public' : s.stageType === 'SIGNED_PRESALE' ? 'presale/GTD' : `stage ${s.stageIndex}`);
-              const price = s.priceUnit != null ? (s.priceUnit ? `${s.priceUnit} ${s.symbol}` : 'FREE') : '';
+              const label =
+                stageLabels.get(String(s.stageIndex)) ||
+                (s.stageType === "PUBLIC_SALE"
+                  ? "public"
+                  : s.stageType === "SIGNED_PRESALE"
+                  ? "presale/GTD"
+                  : `stage ${s.stageIndex}`);
+              const price =
+                s.priceUnit != null
+                  ? s.priceUnit
+                    ? `${s.priceUnit} ${s.symbol}`
+                    : "FREE"
+                  : "";
               // Per-stage competition: allowlist members vs other tracked wallets.
               const bits = [];
-              if (s.allowlistMemberCount != null) bits.push(`allowlist ${s.allowlistMemberCount}`);
+              if (s.allowlistMemberCount != null)
+                bits.push(`allowlist ${s.allowlistMemberCount}`);
               const others = elig.otherEligibleByStage?.[s.stageIndex];
-              if (others != null) bits.push(`+${others} wallet lain eligible`);
-              return `${label}${price ? ` (${price})` : ''}${bits.length ? ` — ${bits.join(', ')}` : ''}`;
+              if (others != null)
+                bits.push(`+${others} other eligible wallets`);
+              return `${label}${price ? ` (${price})` : ""}${
+                bits.length ? ` — ${bits.join(", ")}` : ""
+              }`;
             });
-            lines.push(`✅ \`${w.address.slice(0, 10)}…\`  eligible:`, ...parts.map((p) => `  - ${p}`));
+            lines.push(
+              `✅ \`${w.address.slice(0, 10)}…\`  eligible:`,
+              ...parts.map((p) => `  - ${p}`)
+            );
           } else {
-            lines.push(`⚪ \`${w.address.slice(0, 10)}…\`  not eligible for any stage`);
+            lines.push(
+              `⚪ \`${w.address.slice(0, 10)}…\`  not eligible for any stage`
+            );
           }
         } catch (e) {
-          lines.push(`❌ \`${w.address.slice(0, 10)}…\`  gagal cek: ${e.message}`);
+          lines.push(
+            `❌ \`${w.address.slice(0, 10)}…\`  check failed: ${e.message}`
+          );
         }
       }
-      await bot.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown', disable_web_page_preview: true });
+      await bot.sendMessage(msg.chat.id, lines.join("\n"), {
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+      });
       return;
     }
     // Not an OS2 drop (older Seadrop-direct) → fall through to Seadrop checks.
   }
 
   // Scatter.art collections: list mint lists + per-wallet eligibility.
-  if (target.source === 'scatter') {
+  if (target.source === "scatter") {
     const col = target.scatter;
     const scLinks = [];
     if (col?.website) scLinks.push(`[Website](${col.website})`);
@@ -286,30 +433,49 @@ async function runCheck(msg, rawInput) {
     if (col?.discord) scLinks.push(`[Discord](${col.discord})`);
     if (col?.opensea) scLinks.push(`[OpenSea](${col.opensea})`);
     lines.push(`⚙️  *Scatter* — ${col?.name || target.slug}`);
-    if (scLinks.length) lines.push(`🔗 ${scLinks.join('  ·  ')}`);
+    if (scLinks.length) lines.push(`🔗 ${scLinks.join("  ·  ")}`);
     if (col?.creator) {
-      const cUrl = explorerUrl(target.chain, '').replace(/\/tx\/$/, '/address/') + col.creator;
-      lines.push(`👤 deployer: [${col.creator.slice(0, 10)}…${col.creator.slice(-4)}](${cUrl})`);
+      const cUrl =
+        explorerUrl(target.chain, "").replace(/\/tx\/$/, "/address/") +
+        col.creator;
+      lines.push(
+        `👤 deployer: [${col.creator.slice(0, 10)}…${col.creator.slice(
+          -4
+        )}](${cUrl})`
+      );
     }
     const supText = fmtSupply(col?.maxItems, col?.numItems);
     if (supText) lines.push(`📦 supply: ${supText}`);
     lines.push(
-      '',
-      '━━━━━━━━━━━━━━━━━━━━',
-      `👛 *Eligibility — ${chosen.length} wallet*`,
+      "",
+      "━━━━━━━━━━━━━━━━━━━━",
+      `👛 *Eligibility — ${chosen.length} wallet*`
     );
     for (const w of chosen) {
       const lists = await getEligibleLists(target.slug, w.address);
       const best = pickBestList(lists);
       if (!best) {
-        lines.push(`⚪ \`${w.address.slice(0, 10)}…\`  →  _not eligible for any stage_`);
+        lines.push(
+          `⚪ \`${w.address.slice(0, 10)}…\`  →  _not eligible for any stage_`
+        );
         continue;
       }
-      const priceLabel = best.token_price === '0' ? 'FREE' : `${best.token_price} ${best.currency_symbol || ''}`.trim();
-      const others = lists.length > 1 ? ` (+${lists.length - 1} list lain)` : '';
-      lines.push(`✅ \`${w.address.slice(0, 10)}…\`  →  *${best.name}*  ·  ${priceLabel}${others}`);
+      const priceLabel =
+        best.token_price === "0"
+          ? "FREE"
+          : `${best.token_price} ${best.currency_symbol || ""}`.trim();
+      const others =
+        lists.length > 1 ? ` (+${lists.length - 1} other lists)` : "";
+      lines.push(
+        `✅ \`${w.address.slice(0, 10)}…\`  →  *${
+          best.name
+        }*  ·  ${priceLabel}${others}`
+      );
     }
-    await bot.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown', disable_web_page_preview: true });
+    await bot.sendMessage(msg.chat.id, lines.join("\n"), {
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+    });
     return;
   }
 
@@ -322,153 +488,264 @@ async function runCheck(msg, rawInput) {
       tokenStatus(target.contract, provider).catch(() => null),
     ]);
     const now = Math.floor(Date.now() / 1000);
-    const active = drop.startTime <= now && (drop.endTime === 0 || drop.endTime >= now);
-    const countdown = drop.startTime > now
-      ? `⏳ opens in *${fmtDuration(drop.startTime - now)}*`
-      : (active ? '🟢 *OPEN NOW*' : '🔴 already closed');
-    const window = drop.endTime ? fmtDuration(drop.endTime - drop.startTime) : '∞';
+    const active =
+      drop.startTime <= now && (drop.endTime === 0 || drop.endTime >= now);
+    const countdown =
+      drop.startTime > now
+        ? `⏳ opens in *${fmtDuration(drop.startTime - now)}*`
+        : active
+        ? "🟢 *OPEN NOW*"
+        : "🔴 already closed";
+    const window = drop.endTime
+      ? fmtDuration(drop.endTime - drop.startTime)
+      : "∞";
 
     // Gated mechanisms the bot cannot resolve on-chain.
     const hasSigned = mech.signers.length > 0;
     const hasGated = mech.tokenGated.length > 0;
     const gates = [];
-    if (root) gates.push('🔐 merkle allowlist');
-    if (hasSigned) gates.push('🔏 signed (server signature)');
-    if (hasGated) gates.push('🎫 token-gated');
-    if (!gates.length) gates.push('🌐 public only');
+    if (root) gates.push("🔐 merkle allowlist");
+    if (hasSigned) gates.push("🔏 signed (server signature)");
+    if (hasGated) gates.push("🎫 token-gated");
+    if (!gates.length) gates.push("🌐 public only");
 
     lines.push(
-      `⚙️  Seadrop *${sd.version}*  ·  ${active ? '🟢 ACTIVE' : '🔴 inactive'}`,
-      countdown,
+      `⚙️  Seadrop *${sd.version}*  ·  ${active ? "🟢 ACTIVE" : "🔴 inactive"}`,
+      countdown
     );
     const supText = fmtSupply(st?.maxSupply, st?.totalSupply);
     if (supText) lines.push(`📦 supply: ${supText}`);
     lines.push(
-      '',
-      '💰 *Price*',
+      "",
+      "💰 *Price*",
       `    ${ethers.formatEther(drop.mintPrice)} ETH / unit`,
-      `    ${ethers.formatEther(drop.mintPrice * BigInt(amount))} ETH total (× ${amount})`,
-      '',
-      '🕒 *Schedule (WIBfmtWIBfmtWIB)*',
-      `    opens   ${fmtWIB(drop.startTime)}`,
-      `    closes  ${drop.endTime ? fmtWIB(drop.endTime) : 'no limit'}`,
+      `    ${ethers.formatEther(
+        drop.mintPrice * BigInt(amount)
+      )} ETH total (× ${amount})`,
+      "",
+      "🕒 *Schedule (WAT)*",
+      `    opens   ${fmtWAT(drop.startTime)}`,
+      `    closes  ${drop.endTime ? fmtWAT(drop.endTime) : "no limit"}`,
       `    window  ${window}`,
-      '',
-      '📋 *Rules*',
+      "",
+      "📋 *Rules*",
       `    max/wallet  ${drop.maxPerWallet}`,
-      `    mechanism   ${gates.join(', ')}`,
+      `    mechanism   ${gates.join(", ")}`
     );
 
     // Warn when eligibility is off-chain (signed / token-gated). The bot can
     // only mint public + merkle allowlist; signed/GTD need OpenSea's signature.
     if (hasSigned || hasGated) {
-      lines.push('', '⚠️ *Eligibility off-chain*');
-      if (hasSigned) lines.push('    🔏 signed mint — signature is issued per wallet by OpenSea\'s server.');
-      if (hasGated) lines.push('    🎫 token-gated — requires the qualifying token in the wallet.');
+      lines.push("", "⚠️ *Eligibility off-chain*");
+      if (hasSigned)
+        lines.push(
+          "    🔏 signed mint — signature is issued per wallet by OpenSea's server."
+        );
+      if (hasGated)
+        lines.push(
+          "    🎫 token-gated — requires the qualifying token in the wallet."
+        );
       lines.push(
-        '    The bot *cannot* read this eligibility on-chain (not merkle).',
-        '    Wallets eligible on OpenSea are *not* detected here.',
-        '    Mint signed/GTD: use the OpenSea UI, or wait for the public window.',
+        "    The bot *cannot* read this eligibility on-chain (not merkle).",
+        "    Wallets eligible on OpenSea are *not* detected here.",
+        "    Mint signed/GTD: use the OpenSea UI, or wait for the public window."
       );
     }
 
     // Per-wallet MERKLE eligibility only (the part the bot can resolve).
-    lines.push('', '━━━━━━━━━━━━━━━━━━━━', `👛 *Eligibility merkle — ${chosen.length} wallet*`);
+    lines.push(
+      "",
+      "━━━━━━━━━━━━━━━━━━━━",
+      `👛 *Eligibility merkle — ${chosen.length} wallet*`
+    );
     if (root) {
       for (const w of chosen) {
-        const al = await checkAllowlist(sd.seadrop, target.contract, w.address, provider, root);
+        const al = await checkAllowlist(
+          sd.seadrop,
+          target.contract,
+          w.address,
+          provider,
+          root
+        );
         if (al.eligible) {
           const alPrice = ethers.formatEther(al.mintParams[0]);
-          lines.push(`✅ \`${w.address.slice(0, 10)}…\`  →  allowlist  ·  ${alPrice} ETH  ·  max ${al.mintParams[1]}`);
+          lines.push(
+            `✅ \`${w.address.slice(
+              0,
+              10
+            )}…\`  →  allowlist  ·  ${alPrice} ETH  ·  max ${al.mintParams[1]}`
+          );
         } else {
-          lines.push(`⚪ \`${w.address.slice(0, 10)}…\`  →  ${al.reason || 'not in merkle allowlist'}`);
+          lines.push(
+            `⚪ \`${w.address.slice(0, 10)}…\`  →  ${
+              al.reason || "not in merkle allowlist"
+            }`
+          );
         }
       }
     } else if (hasSigned || hasGated) {
-      lines.push('_no merkle allowlist — eligibility via signed/token-gated (off-chain)_');
+      lines.push(
+        "_no merkle allowlist — eligibility via signed/token-gated (off-chain)_"
+      );
     } else {
       lines.push(`🌐 all ${chosen.length} wallet → *public mint* (no gate)`);
     }
   } else {
     const st = await tokenStatus(target.contract, provider);
-    lines.push('⚙️  *Generic contract* (not Seadrop)', '');
+    lines.push("⚙️  *Generic contract* (not Seadrop)", "");
     try {
       const fn = await detectMintFunction(target.contract, signer, amount);
       const price = await detectPrice(target.contract, provider, amount);
       lines.push(
-        '💰 *Mint*',
+        "💰 *Mint*",
         `    fn     \`${fn.sig}\``,
-        `    price  ${ethers.formatEther(price)} ETH`,
+        `    price  ${ethers.formatEther(price)} ETH`
       );
     } catch (e) {
       lines.push(`⚠️  mint fn not recognised: _${e.message}_`);
     }
     const supText = fmtSupply(st.maxSupply, st.totalSupply);
-    if (supText) lines.push('', `📦 supply: ${supText}`);
+    if (supText) lines.push("", `📦 supply: ${supText}`);
   }
-  await bot.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown', disable_web_page_preview: true });
+  await bot.sendMessage(msg.chat.id, lines.join("\n"), {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+  });
 }
 
-bot.onText(/^\/(?:check|c)\s+(.+)/s, guard(async (msg, match) => {
-  await runCheck(msg, match[1]);
-}));
+bot.onText(
+  /^\/(?:check|c)\s+(.+)/s,
+  guard(async (msg, match) => {
+    await runCheck(msg, match[1]);
+  })
+);
 
 // Auto-listener: a bare message that is just a supported mint URL (OpenSea /
 // Scatter collection, or a raw 0x contract) triggers /check automatically.
-const BARE_TARGET_RE = /^(?:https?:\/\/(?:www\.)?(?:opensea\.io|scatter\.art)\/\S+(?:\s.*)?|0x[a-fA-F0-9]{40}(?:\s.*)?)$/;
-bot.onText(BARE_TARGET_RE, guard(async (msg) => {
-  const text = (msg.text || '').trim();
-  // Ignore anything that's actually a command (handled elsewhere).
-  if (text.startsWith('/')) return;
-  await runCheck(msg, text);
-}));
+const BARE_TARGET_RE =
+  /^(?:https?:\/\/(?:www\.)?(?:opensea\.io|scatter\.art)\/\S+(?:\s.*)?|0x[a-fA-F0-9]{40}(?:\s.*)?)$/;
+bot.onText(
+  BARE_TARGET_RE,
+  guard(async (msg) => {
+    const text = (msg.text || "").trim();
+    // Ignore anything that's actually a command (handled elsewhere).
+    if (text.startsWith("/")) return;
+    await runCheck(msg, text);
+  })
+);
 
 // Shared streaming-mint runner: streams progress into one editable message,
 // then posts a final receipt. `runner(onEvent)` performs the actual mint.
 async function streamMint(chatId, target, runner, walletCount = 1) {
-  const status = await bot.sendMessage(chatId, `⏳ \`${target.contract}\` on ${target.chain}${walletCount > 1 ? ` — ${walletCount} wallet` : ''}…`, { parse_mode: 'Markdown' });
+  const status = await bot.sendMessage(
+    chatId,
+    `⏳ \`${target.contract}\` on ${target.chain}${
+      walletCount > 1 ? ` — ${walletCount} wallet` : ""
+    }…`,
+    { parse_mode: "Markdown" }
+  );
   const log = [];
   const push = async (line) => {
     log.push(line);
     if (log.length > 14) log.shift();
-    await bot.editMessageText(log.join('\n'), {
-      chat_id: chatId, message_id: status.message_id, parse_mode: 'Markdown',
-    }).catch(() => {});
+    await bot
+      .editMessageText(log.join("\n"), {
+        chat_id: chatId,
+        message_id: status.message_id,
+        parse_mode: "Markdown",
+      })
+      .catch(() => {});
   };
 
-  const tag = (ev) => (ev.wallet ? ` \`${ev.wallet.slice(0, 8)}\`` : '');
+  const tag = (ev) => (ev.wallet ? ` \`${ev.wallet.slice(0, 8)}\`` : "");
   const onEvent = async (ev) => {
     switch (ev.stage) {
-      case 'scheduled': await push(`🕒 scheduled ${ev.WIBfmtWIBfmtWIB} — starts in ${fmtDuration(ev.waitMs / 1000)}`); break;
-      case 'waiting_open': await push(`⏱ waiting for on-chain open: ${ev.WIBfmtWIBfmtWIB}`); break;
-      case 'polling': await push(`🔁 polling every ${ev.pollMs}ms until open…`); break;
-      case 'still_closed': await push(`🔒 attempt #${ev.attempts} — ${ev.lastErr}`); break;
-      case 'target': await push(`🎯${tag(ev)} target \`${ev.contract}\` × ${ev.amount}`); break;
-      case 'allowlist': await push(ev.eligible ? `🔐${tag(ev)} allowlist — eligible ✅` : `🌐${tag(ev)} public — _${ev.reason || 'not on allowlist'}_`); break;
-      case 'price_protect': await push(`🛡 price protection: max ${ev.maxPriceEth} ETH${ev.auto ? ' (auto-lock)' : ''}`); break;
-      case 'detected': await push(`🧩${tag(ev)} ${ev.fn} — 💰 ${ev.price} ETH`); break;
-      case 'gas': await push(`⛽${tag(ev)} gas limit ${ev.gasLimit}`); break;
-      case 'sent': await push(`📤${tag(ev)} sent \`${ev.hash.slice(0, 14)}…\``); break;
-      case 'wallet_error': await push(`❌ \`${ev.wallet.slice(0, 8)}\` ${ev.error}`); break;
+      case "scheduled":
+        await push(
+          `🕒 scheduled ${ev.wib} — starts in ${fmtDuration(ev.waitMs / 1000)}`
+        );
+        break;
+      case "waiting_open":
+        await push(`⏱ waiting for on-chain open: ${ev.wib}`);
+        break;
+      case "polling":
+        await push(`🔁 polling every ${ev.pollMs}ms until open…`);
+        break;
+      case "still_closed":
+        await push(`🔒 attempt #${ev.attempts} — ${ev.lastErr}`);
+        break;
+      case "target":
+        await push(`🎯${tag(ev)} target \`${ev.contract}\` × ${ev.amount}`);
+        break;
+      case "allowlist":
+        await push(
+          ev.eligible
+            ? `🔐${tag(ev)} allowlist — eligible ✅`
+            : `🌐${tag(ev)} public — _${ev.reason || "not on allowlist"}_`
+        );
+        break;
+      case "price_protect":
+        await push(
+          `🛡 price protection: max ${ev.maxPriceEth} ETH${
+            ev.auto ? " (auto-lock)" : ""
+          }`
+        );
+        break;
+      case "detected":
+        await push(`🧩${tag(ev)} ${ev.fn} — 💰 ${ev.price} ETH`);
+        break;
+      case "gas":
+        await push(`⛽${tag(ev)} gas limit ${ev.gasLimit}`);
+        break;
+      case "sent":
+        await push(`📤${tag(ev)} sent \`${ev.hash.slice(0, 14)}…\``);
+        break;
+      case "wallet_error":
+        await push(`❌ \`${ev.wallet.slice(0, 8)}\` ${ev.error}`);
+        break;
     }
   };
 
   const results = await runner(onEvent);
   const arr = Array.isArray(results) ? results : [results];
-  const ok = arr.filter((r) => r.status === 'success').length;
+  const ok = arr.filter((r) => r.status === "success").length;
   const multi = arr.length > 1;
 
   const header = multi
-    ? (ok === arr.length ? `🎉 *${ok}/${arr.length} MINTED*` : ok ? `📊 *${ok}/${arr.length} MINTED* (${arr.length - ok} failed)` : `⚠️ *0/${arr.length} — ALL FAILED*`)
-    : (arr[0].status === 'success' ? '🎉 *MINTED!*' : arr[0].status === 'error' ? '❌ *FAILED*' : '⚠️ *REVERTED*');
-  const lines = [header, '━━━━━━━━━━━━━━━━━━━━', `📄 \`${target.contract}\``, `🔗 ${target.chain}`, ''];
+    ? ok === arr.length
+      ? `🎉 *${ok}/${arr.length} MINTED*`
+      : ok
+      ? `📊 *${ok}/${arr.length} MINTED* (${arr.length - ok} failed)`
+      : `⚠️ *0/${arr.length} — ALL FAILED*`
+    : arr[0].status === "success"
+    ? "🎉 *MINTED!*"
+    : arr[0].status === "error"
+    ? "❌ *FAILED*"
+    : "⚠️ *REVERTED*";
+  const lines = [
+    header,
+    "━━━━━━━━━━━━━━━━━━━━",
+    `📄 \`${target.contract}\``,
+    `🔗 ${target.chain}`,
+    "",
+  ];
   for (const r of arr) {
-    if (r.status === 'error') { lines.push(`❌ \`${r.wallet.slice(0, 10)}…\`  ${r.error}`); continue; }
-    const mark = r.status === 'success' ? '✅' : '⚠️';
-    const who = r.wallet ? `\`${r.wallet.slice(0, 8)}…\`  ` : '';
-    lines.push(`${mark} ${who}[${r.hash.slice(0, 12)}…](${r.explorer}) · block ${r.block}`);
+    if (r.status === "error") {
+      lines.push(`❌ \`${r.wallet.slice(0, 10)}…\`  ${r.error}`);
+      continue;
+    }
+    const mark = r.status === "success" ? "✅" : "⚠️";
+    const who = r.wallet ? `\`${r.wallet.slice(0, 8)}…\`  ` : "";
+    lines.push(
+      `${mark} ${who}[${r.hash.slice(0, 12)}…](${r.explorer}) · block ${
+        r.block
+      }`
+    );
   }
-  await bot.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown', disable_web_page_preview: true });
+  await bot.sendMessage(chatId, lines.join("\n"), {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+  });
   return { ok, total: arr.length, results: arr };
 }
 
@@ -484,201 +761,324 @@ function pickWallets(input) {
   return pickWalletsAndPrice(input);
 }
 
-bot.onText(/^\/(?:mint|m)\s+([\s\S]+)/, guard(async (msg, match) => {
-  const { chosen, priceSpec, rest } = pickWalletsAndPrice(match[1]);
-  const target = await resolveTarget(parseTarget(rest));
-  const parsedPrice = priceSpec ? parsePriceSpec(priceSpec, target.amount) : null;
-  const maxPriceWei = parsedPrice?.isUnlimited ? null : parsedPrice?.maxPriceWei;
-  await streamMint(msg.chat.id, target, (onEvent) => mintMany(target, chosen, onEvent, { maxPriceWei }), chosen.length);
-}));
+bot.onText(
+  /^\/(?:mint|m)\s+([\s\S]+)/,
+  guard(async (msg, match) => {
+    const { chosen, priceSpec, rest } = pickWalletsAndPrice(match[1]);
+    const target = await resolveTarget(parseTarget(rest));
+    const parsedPrice = priceSpec
+      ? parsePriceSpec(priceSpec, target.amount)
+      : null;
+    const maxPriceWei = parsedPrice?.isUnlimited
+      ? null
+      : parsedPrice?.maxPriceWei;
+    await streamMint(
+      msg.chat.id,
+      target,
+      (onEvent) => mintMany(target, chosen, onEvent, { maxPriceWei }),
+      chosen.length
+    );
+  })
+);
 
 // /mintat <time> | <url|contract> [chain] [amount] [wallets:all|N|1,2] [max:price]
 // The "|" separates the time spec from the target (times may contain spaces).
-bot.onText(/^\/(?:mintat|ma)\s+([\s\S]+)/, guard(async (msg, match) => {
-  const raw = match[1];
-  const bar = raw.indexOf('|');
-  if (bar === -1) throw new Error('usage: /mintat <time> | <url|contract> [chain] [amount] [wallets:all|N] [max:price]');
-  const whenSpec = raw.slice(0, bar).trim();
-  const { chosen, priceSpec, rest: targetSpec } = pickWalletsAndPrice(raw.slice(bar + 1).trim());
-  const whenUnix = parseWhen(whenSpec);
-  if (whenUnix * 1000 <= Date.now()) throw new Error('that time has already passed');
+bot.onText(
+  /^\/(?:mintat|ma)\s+([\s\S]+)/,
+  guard(async (msg, match) => {
+    const raw = match[1];
+    const bar = raw.indexOf("|");
+    if (bar === -1)
+      throw new Error(
+        "usage: /mintat <time> | <url|contract> [chain] [amount] [wallets:all|N] [max:price]"
+      );
+    const whenSpec = raw.slice(0, bar).trim();
+    const {
+      chosen,
+      priceSpec,
+      rest: targetSpec,
+    } = pickWalletsAndPrice(raw.slice(bar + 1).trim());
+    const whenUnix = parseWhen(whenSpec);
+    if (whenUnix * 1000 <= Date.now())
+      throw new Error("that time has already passed");
 
-  const target = await resolveTarget(parseTarget(targetSpec));
-  const parsedPrice = priceSpec ? parsePriceSpec(priceSpec, target.amount) : null;
-  let maxPriceWei = parsedPrice?.maxPriceWei;
-  const isUnlimited = parsedPrice?.isUnlimited;
-  let isAutoProtect = false;
+    const target = await resolveTarget(parseTarget(targetSpec));
+    const parsedPrice = priceSpec
+      ? parsePriceSpec(priceSpec, target.amount)
+      : null;
+    let maxPriceWei = parsedPrice?.maxPriceWei;
+    const isUnlimited = parsedPrice?.isUnlimited;
+    let isAutoProtect = false;
 
-  if (maxPriceWei === undefined && !isUnlimited) {
-    try {
-      const pInfo = await resolveTargetPrice(target, chosen[0]);
-      if (pInfo && pInfo.priceWei != null) {
-        maxPriceWei = pInfo.priceWei;
-        isAutoProtect = true;
+    if (maxPriceWei === undefined && !isUnlimited) {
+      try {
+        const pInfo = await resolveTargetPrice(target, chosen[0]);
+        if (pInfo && pInfo.priceWei != null) {
+          maxPriceWei = pInfo.priceWei;
+          isAutoProtect = true;
+        }
+      } catch {
+        /* ignore */
       }
-    } catch { /* ignore */ }
-  }
+    }
 
-  const job = addJob({
-    mode: 'at',
-    whenUnix,
-    contract: target.contract,
-    chain: target.chain,
-    amount: target.amount || 1,
-    wallets: chosen.length,
-    maxPriceWei: maxPriceWei ?? null,
-    status: 'scheduled',
-    chatId: msg.chat.id,
-  });
-
-  let protectText = '';
-  if (isUnlimited) {
-    protectText = '🛡 Price protection: *disabled (unlimited)*';
-  } else if (maxPriceWei != null) {
-    const label = maxPriceWei === 0n ? 'FREE (0 ETH)' : `${ethers.formatEther(maxPriceWei)} ETH`;
-    protectText = `🛡 Price protection: max *${label}*${isAutoProtect ? ' _(auto-locked to initial price)_' : ''}`;
-  }
-
-  await bot.sendMessage(msg.chat.id, [
-    `🗓 *Job #${job.id} scheduled*`,
-    '━━━━━━━━━━━━━━━━━━━━',
-    `📄 \`${target.contract}\``,
-    `🔗 ${target.chain}  ·  🎯 × ${job.amount}  ·  👛 ${chosen.length} wallet`,
-    ...(protectText ? [protectText] : []),
-    `⏰ ${fmtWIB(whenUnix)}`,
-  ].join('\n'), { parse_mode: 'Markdown' });
-
-  // Fire-and-forget; streams into its own message when it triggers.
-  streamMint(msg.chat.id, target, (onEvent) => {
-    job.status = 'running';
-    return mintAt(target, chosen, whenUnix, onEvent, {
-      signal: job.controller.signal,
-      maxPriceWei: isUnlimited ? null : maxPriceWei,
+    const job = addJob({
+      mode: "at",
+      whenUnix,
+      contract: target.contract,
+      chain: target.chain,
+      amount: target.amount || 1,
+      wallets: chosen.length,
+      maxPriceWei: maxPriceWei ?? null,
+      status: "scheduled",
+      chatId: msg.chat.id,
     });
-  }, chosen.length).then((r) => { job.status = r.ok === r.total ? 'done' : (r.ok ? 'partial' : 'reverted'); })
-    .catch((e) => { job.status = 'failed'; safeSend(msg.chat.id, `❌ job #${job.id}: ${e.message}`); })
-    .finally(() => { setTimeout(() => jobs.delete(job.id), 60_000); });
-}));
+
+    let protectText = "";
+    if (isUnlimited) {
+      protectText = "🛡 Price protection: *disabled (unlimited)*";
+    } else if (maxPriceWei != null) {
+      const label =
+        maxPriceWei === 0n
+          ? "FREE (0 ETH)"
+          : `${ethers.formatEther(maxPriceWei)} ETH`;
+      protectText = `🛡 Price protection: max *${label}*${
+        isAutoProtect ? " _(auto-locked to initial price)_" : ""
+      }`;
+    }
+
+    await bot.sendMessage(
+      msg.chat.id,
+      [
+        `🗓 *Job #${job.id} scheduled*`,
+        "━━━━━━━━━━━━━━━━━━━━",
+        `📄 \`${target.contract}\``,
+        `🔗 ${target.chain}  ·  🎯 × ${job.amount}  ·  👛 ${chosen.length} wallet`,
+        ...(protectText ? [protectText] : []),
+        `⏰ ${fmtWAT(whenUnix)}`,
+      ].join("\n"),
+      { parse_mode: "Markdown" }
+    );
+
+    // Fire-and-forget; streams into its own message when it triggers.
+    streamMint(
+      msg.chat.id,
+      target,
+      (onEvent) => {
+        job.status = "running";
+        return mintAt(target, chosen, whenUnix, onEvent, {
+          signal: job.controller.signal,
+          maxPriceWei: isUnlimited ? null : maxPriceWei,
+        });
+      },
+      chosen.length
+    )
+      .then((r) => {
+        job.status = r.ok === r.total ? "done" : r.ok ? "partial" : "reverted";
+      })
+      .catch((e) => {
+        job.status = "failed";
+        safeSend(msg.chat.id, `❌ job #${job.id}: ${e.message}`);
+      })
+      .finally(() => {
+        setTimeout(() => jobs.delete(job.id), 60_000);
+      });
+  })
+);
 
 // /mintopen <url|contract> [chain] [amount] [wallets:all|N] [max:price] — mint on open.
-bot.onText(/^\/(?:mintopen|mo)\s+([\s\S]+)/, guard(async (msg, match) => {
-  const { chosen, priceSpec, rest } = pickWalletsAndPrice(match[1]);
-  const target = await resolveTarget(parseTarget(rest));
+bot.onText(
+  /^\/(?:mintopen|mo)\s+([\s\S]+)/,
+  guard(async (msg, match) => {
+    const { chosen, priceSpec, rest } = pickWalletsAndPrice(match[1]);
+    const target = await resolveTarget(parseTarget(rest));
 
-  const parsedPrice = priceSpec ? parsePriceSpec(priceSpec, target.amount) : null;
-  let maxPriceWei = parsedPrice ? parsedPrice.maxPriceWei : undefined;
-  const isUnlimited = parsedPrice?.isUnlimited;
-  let isAutoProtect = false;
+    const parsedPrice = priceSpec
+      ? parsePriceSpec(priceSpec, target.amount)
+      : null;
+    let maxPriceWei = parsedPrice ? parsedPrice.maxPriceWei : undefined;
+    const isUnlimited = parsedPrice?.isUnlimited;
+    let isAutoProtect = false;
 
-  // Resolve the stage this wallet is actually eligible for. For OpenSea drops
-  // this is the earliest eligible stage (GTD/presale before public); falls
-  // back to the on-chain Seadrop window. Shown on the card so the user sees
-  // which stage + price + time will be targeted, not "unknown".
-  let openAt = null;
-  let stageLabel = null;
-  if (target.source === 'opensea' && target.slug) {
-    try {
-      const cookie = await getSessionCookies(chosen[0]);
-      const win = await getEligibleOpenWindow(target.slug, chosen[0].address, cookie);
-      if (win) {
-        openAt = win.startTime;
-        const kind = win.stageType === 'PUBLIC_SALE' ? 'public'
-          : win.stageType === 'SIGNED_PRESALE' ? 'presale/GTD'
-          : win.stageType === 'MERKLE_PRESALE' ? 'allowlist' : `stage ${win.stageIndex}`;
-        const price = win.priceUnit ? `${win.priceUnit} ${win.symbol}` : 'FREE';
-        stageLabel = `${kind} #${win.stageIndex} · ${price}`;
+    // Resolve the stage this wallet is actually eligible for. For OpenSea drops
+    // this is the earliest eligible stage (GTD/presale before public); falls
+    // back to the on-chain Seadrop window. Shown on the card so the user sees
+    // which stage + price + time will be targeted, not "unknown".
+    let openAt = null;
+    let stageLabel = null;
+    if (target.source === "opensea" && target.slug) {
+      try {
+        const cookie = await getSessionCookies(chosen[0]);
+        const win = await getEligibleOpenWindow(
+          target.slug,
+          chosen[0].address,
+          cookie
+        );
+        if (win) {
+          openAt = win.startTime;
+          const kind =
+            win.stageType === "PUBLIC_SALE"
+              ? "public"
+              : win.stageType === "SIGNED_PRESALE"
+              ? "presale/GTD"
+              : win.stageType === "MERKLE_PRESALE"
+              ? "allowlist"
+              : `stage ${win.stageIndex}`;
+          const price = win.priceUnit
+            ? `${win.priceUnit} ${win.symbol}`
+            : "FREE";
+          stageLabel = `${kind} #${win.stageIndex} · ${price}`;
+        }
+      } catch {
+        /* eligibility resolve failed → try on-chain below */
       }
-    } catch { /* eligibility resolve failed → try on-chain below */ }
-  }
-  if (openAt == null) {
-    try { openAt = await resolveOpenTime(target); } catch { /* not seadrop */ }
-  }
-
-  // If maxPrice wasn't explicitly provided and not unlimited, auto-lock initial expected price
-  if (maxPriceWei === undefined && !isUnlimited) {
-    try {
-      const pInfo = await resolveTargetPrice(target, chosen[0]);
-      if (pInfo && pInfo.priceWei != null) {
-        maxPriceWei = pInfo.priceWei;
-        isAutoProtect = true;
+    }
+    if (openAt == null) {
+      try {
+        openAt = await resolveOpenTime(target);
+      } catch {
+        /* not seadrop */
       }
-    } catch { /* ignore */ }
-  }
+    }
 
-  const job = addJob({
-    mode: 'open',
-    whenUnix: openAt,
-    contract: target.contract,
-    chain: target.chain,
-    amount: target.amount || 1,
-    wallets: chosen.length,
-    maxPriceWei: maxPriceWei ?? null,
-    status: 'WIBfmtWIBching',
-    chatId: msg.chat.id,
-  });
+    // If maxPrice wasn't explicitly provided and not unlimited, auto-lock initial expected price
+    if (maxPriceWei === undefined && !isUnlimited) {
+      try {
+        const pInfo = await resolveTargetPrice(target, chosen[0]);
+        if (pInfo && pInfo.priceWei != null) {
+          maxPriceWei = pInfo.priceWei;
+          isAutoProtect = true;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
 
-  const when = openAt ? fmtWIB(openAt) : '_not known yet — polling on-chain simulation_';
-  let protectText = '';
-  if (isUnlimited) {
-    protectText = '🛡 Price protection: *disabled (unlimited)*';
-  } else if (maxPriceWei != null) {
-    const label = maxPriceWei === 0n ? 'FREE (0 ETH)' : `${ethers.formatEther(maxPriceWei)} ETH`;
-    protectText = `🛡 Price protection: max *${label}*${isAutoProtect ? ' _(auto-locked to initial price)_' : ''}`;
-  } else {
-    protectText = '🛡 Price protection: _not detected yet (use max:<price> to set a limit)_';
-  }
-
-  await bot.sendMessage(msg.chat.id, [
-    `👀 *Job #${job.id} — Watching for open*`,
-    '━━━━━━━━━━━━━━━━━━━━',
-    `📄 \`${target.contract}\``,
-    `🔗 ${target.chain}  ·  🎯 × ${job.amount}  ·  👛 ${chosen.length} wallet`,
-    ...(stageLabel ? [`🎟 ${stageLabel}`] : []),
-    protectText,
-    `⏰ ${when}`,
-  ].join('\n'), { parse_mode: 'Markdown' });
-
-  streamMint(msg.chat.id, target, (onEvent) => {
-    job.status = 'running';
-    return mintWhenOpen(target, chosen, onEvent, {
-      signal: job.controller.signal,
-      maxPriceWei: isUnlimited ? null : maxPriceWei,
+    const job = addJob({
+      mode: "open",
+      whenUnix: openAt,
+      contract: target.contract,
+      chain: target.chain,
+      amount: target.amount || 1,
+      wallets: chosen.length,
+      maxPriceWei: maxPriceWei ?? null,
+      status: "watching",
+      chatId: msg.chat.id,
     });
-  }, chosen.length).then((r) => { job.status = r.ok === r.total ? 'done' : (r.ok ? 'partial' : 'reverted'); })
-    .catch((e) => { job.status = 'failed'; safeSend(msg.chat.id, `❌ job #${job.id}: ${e.message}`); })
-    .finally(() => { setTimeout(() => jobs.delete(job.id), 60_000); });
-}));
 
-bot.onText(/^\/jobs$/, guard(async (msg) => {
-  const active = [...jobs.values()];
-  if (!active.length) { await bot.sendMessage(msg.chat.id, '📭 no job'); return; }
-  await bot.sendMessage(msg.chat.id, [`📋 *JOBS — ${active.length}*`, '━━━━━━━━━━━━━━━━━━━━', ...active.map(fmtJob)].join('\n'), { parse_mode: 'Markdown' });
-}));
+    const when = openAt
+      ? fmtWAT(openAt)
+      : "_not known yet — polling on-chain simulation_";
+    let protectText = "";
+    if (isUnlimited) {
+      protectText = "🛡 Price protection: *disabled (unlimited)*";
+    } else if (maxPriceWei != null) {
+      const label =
+        maxPriceWei === 0n
+          ? "FREE (0 ETH)"
+          : `${ethers.formatEther(maxPriceWei)} ETH`;
+      protectText = `🛡 Price protection: max *${label}*${
+        isAutoProtect ? " _(auto-locked to initial price)_" : ""
+      }`;
+    } else {
+      protectText =
+        "🛡 Price protection: _not detected yet (use max:<price> to set a limit)_";
+    }
 
-bot.onText(/^\/cancel\s+(\S+)/, guard(async (msg, match) => {
-  const job = jobs.get(match[1].trim());
-  if (!job) { await bot.sendMessage(msg.chat.id, `no job #${match[1]}`); return; }
-  job.controller.abort();
-  job.status = 'cancelled';
-  jobs.delete(job.id);
-  await bot.sendMessage(msg.chat.id, `🛑 cancelled job #${job.id}`);
-}));
+    await bot.sendMessage(
+      msg.chat.id,
+      [
+        `👀 *Job #${job.id} — Watching for open*`,
+        "━━━━━━━━━━━━━━━━━━━━",
+        `📄 \`${target.contract}\``,
+        `🔗 ${target.chain}  ·  🎯 × ${job.amount}  ·  👛 ${chosen.length} wallet`,
+        ...(stageLabel ? [`🎟 ${stageLabel}`] : []),
+        protectText,
+        `⏰ ${when}`,
+      ].join("\n"),
+      { parse_mode: "Markdown" }
+    );
+
+    streamMint(
+      msg.chat.id,
+      target,
+      (onEvent) => {
+        job.status = "running";
+        return mintWhenOpen(target, chosen, onEvent, {
+          signal: job.controller.signal,
+          maxPriceWei: isUnlimited ? null : maxPriceWei,
+        });
+      },
+      chosen.length
+    )
+      .then((r) => {
+        job.status = r.ok === r.total ? "done" : r.ok ? "partial" : "reverted";
+      })
+      .catch((e) => {
+        job.status = "failed";
+        safeSend(msg.chat.id, `❌ job #${job.id}: ${e.message}`);
+      })
+      .finally(() => {
+        setTimeout(() => jobs.delete(job.id), 60_000);
+      });
+  })
+);
+
+bot.onText(
+  /^\/jobs$/,
+  guard(async (msg) => {
+    const active = [...jobs.values()];
+    if (!active.length) {
+      await bot.sendMessage(msg.chat.id, "📭 no job");
+      return;
+    }
+    await bot.sendMessage(
+      msg.chat.id,
+      [
+        `📋 *JOBS — ${active.length}*`,
+        "━━━━━━━━━━━━━━━━━━━━",
+        ...active.map(fmtJob),
+      ].join("\n"),
+      { parse_mode: "Markdown" }
+    );
+  })
+);
+
+bot.onText(
+  /^\/cancel\s+(\S+)/,
+  guard(async (msg, match) => {
+    const job = jobs.get(match[1].trim());
+    if (!job) {
+      await bot.sendMessage(msg.chat.id, `no job #${match[1]}`);
+      return;
+    }
+    job.controller.abort();
+    job.status = "cancelled";
+    jobs.delete(job.id);
+    await bot.sendMessage(msg.chat.id, `🛑 cancelled job #${job.id}`);
+  })
+);
 
 // Polling error handler with auto-recovery. Network blips (ETIMEDOUT, ENOTFOUND,
 // EFATAL, socket hang up) can silently stop the poll loop; detect them and
 // restart polling with backoff so an unstable connection self-heals.
 let pollRestarting = false;
-bot.on('polling_error', async (e) => {
+bot.on("polling_error", async (e) => {
   const msg = e?.message || String(e);
-  console.error('[poll]', msg);
-  const transient = /ETIMEDOUT|ENOTFOUND|ECONNRESET|EAI_AGAIN|EFATAL|socket hang up|network|timeout|aggregate/i.test(msg);
+  console.error("[poll]", msg);
+  const transient =
+    /ETIMEDOUT|ENOTFOUND|ECONNRESET|EAI_AGAIN|EFATAL|socket hang up|network|timeout|aggregate/i.test(
+      msg
+    );
   if (!transient || pollRestarting) return;
   pollRestarting = true;
   try {
     await bot.stopPolling().catch(() => {});
     await new Promise((r) => setTimeout(r, 3000));
-    await bot.startPolling().catch((err) => console.error('[poll] restart failed:', err?.message));
-    console.error('[poll] polling restarted after transient error');
+    await bot
+      .startPolling()
+      .catch((err) => console.error("[poll] restart failed:", err?.message));
+    console.error("[poll] polling restarted after transient error");
   } finally {
     pollRestarting = false;
   }
@@ -686,8 +1086,16 @@ bot.on('polling_error', async (e) => {
 
 // Last-resort guard: an unexpected async error (e.g. a background sendMessage
 // to a blocked user) must be logged, not crash the whole bot.
-process.on('unhandledRejection', (e) => console.error('[unhandled]', e?.message || e));
-process.on('uncaughtException', (e) => console.error('[uncaught]', e?.message || e));
+process.on("unhandledRejection", (e) =>
+  console.error("[unhandled]", e?.message || e)
+);
+process.on("uncaughtException", (e) =>
+  console.error("[uncaught]", e?.message || e)
+);
 
 console.log(`[BOT] up as ${wallet.address}`);
-console.log(`[BOT] allowed users: ${ALLOWED.length ? ALLOWED.join(', ') : '(none — set ALLOWED_USER_IDS)'}`);
+console.log(
+  `[BOT] allowed users: ${
+    ALLOWED.length ? ALLOWED.join(", ") : "(none — set ALLOWED_USER_IDS)"
+  }`
+);

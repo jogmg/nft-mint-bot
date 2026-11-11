@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { fmtWIB } from "./time.js";
+import { fmtWAT } from "./time.js";
 import { getProvider } from "./chains.js";
 import { mintOne, mintMany } from "./mint.js";
 import { detectSeadrop, getPublicDrop } from "./seadrop.js";
@@ -31,7 +31,7 @@ async function prewarmOpensea(target, wallets, onEvent) {
           stage: "allowlist",
           eligible: false,
           wallet: w.address,
-          reason: `pre-warm gagal: ${e.message}`,
+          reason: `pre-warm failed: ${e.message}`,
         });
       }
     })
@@ -40,7 +40,7 @@ async function prewarmOpensea(target, wallets, onEvent) {
 
 // Parse a "when" spec into an absolute unix seconds timestamp.
 // Accepts: unix seconds (10 digits), unix ms (13 digits), ISO 8601,
-// relative "in 30s|5m|2h|1d" / "30s" / "5m", or "HH:MM" (next occurrence, WIB).
+// relative "in 30s|5m|2h|1d" / "30s" / "5m", or "HH:MM" (next occurrence, WAT).
 export function parseWhen(spec, nowMs = Date.now()) {
   const s = String(spec).trim().toLowerCase();
 
@@ -60,14 +60,14 @@ export function parseWhen(spec, nowMs = Date.now()) {
   // unix seconds
   if (/^\d{10}$/.test(s)) return Number(s);
 
-  // HH:MM — interpreted as WIB (UTC+7), next occurrence.
+  // HH:MM — interpreted as WAT (UTC+1), next occurrence.
   m = s.match(/^(\d{1,2}):(\d{2})$/);
   if (m) {
-    const WIB = 7 * 3600 * 1000;
-    // Shift into WIB wall-clock, set the hh:mm there, shift back to UTC.
-    const d = new Date(nowMs + WIB);
+    const WAT = 60 * 60 * 1000;
+    // Shift into WAT wall-clock, set the hh:mm there, shift back to UTC.
+    const d = new Date(nowMs + WAT);
     d.setUTCHours(Number(m[1]), Number(m[2]), 0, 0);
-    let t = Math.floor((d.getTime() - WIB) / 1000);
+    let t = Math.floor((d.getTime() - WAT) / 1000);
     if (t * 1000 <= nowMs) t += 86400; // already passed today → tomorrow
     return t;
   }
@@ -115,7 +115,7 @@ export async function mintAt(
     stage: "scheduled",
     when: whenUnix,
     waitMs,
-    wib: fmtWIB(whenUnix),
+    wib: fmtWAT(whenUnix),
   });
   return mintWhenOpen(target, wallets, onEvent, {
     ...opts,
@@ -139,6 +139,17 @@ const TERMINAL_OPENSEA_CODES = new Set([
   "InsufficientMintsRemainingError",
   "NotEligibleError",
 ]);
+
+export function pickEffectiveOpenAt({
+  requestedOpenAt,
+  eligibleOpenAt,
+  fallbackOpenAt,
+} = {}) {
+  const values = [requestedOpenAt, eligibleOpenAt, fallbackOpenAt].filter(
+    (value) => value != null && Number.isFinite(Number(value))
+  );
+  return values.length ? Math.min(...values) : null;
+}
 
 export function rateLimitDelayMs(
   attempt,
@@ -178,14 +189,14 @@ export async function mintWhenOpen(
   const attemptMint = opts.mintOne ?? mintOne;
   const attemptMany = opts.mintMany ?? mintMany;
 
-  // Resolve the launch window. Prefer an explicit start (scheduled /ma). For
-  // OpenSea drops, resolve the earliest stage THIS wallet is eligible for
-  // (GTD/presale usually opens earlier and cheaper than public) via an
-  // authenticated session — not the public stage. Falls back to the on-chain
-  // Seadrop window for non-OpenSea / when eligibility can't be resolved.
+  // Resolve the launch window. Prefer the earliest valid launch across the
+  // explicit request, the authenticated OpenSea eligible stage, and the
+  // on-chain fallback. This keeps scheduled runs stage-aware when the wallet is
+  // eligible for a GTD/presale stage that opens earlier than the raw wall-clock.
   let openAt = opts.startAtUnix ?? null;
   let endAt = opts.endAtUnix ?? 0;
   let eligibleStage = null;
+  let fallbackOpenAt = null;
 
   // Resolve price protection: explicit maxPriceWei or auto-lock to initial detected price.
   let maxPriceWei = opts.maxPriceWei;
@@ -214,7 +225,7 @@ export async function mintWhenOpen(
     });
   }
 
-  if (openAt == null && target.source === "opensea" && target.slug) {
+  if (target.source === "opensea" && target.slug) {
     try {
       const cookie = await getSessionCookies(list[0]);
       const win = await getEligibleOpenWindow(
@@ -224,7 +235,11 @@ export async function mintWhenOpen(
       );
       if (win) {
         eligibleStage = win;
-        openAt = win.startTime;
+        openAt = pickEffectiveOpenAt({
+          requestedOpenAt: openAt,
+          eligibleOpenAt: win.startTime,
+          fallbackOpenAt,
+        });
         endAt = win.endTime;
         const label =
           win.stageType === "PUBLIC_SALE"
@@ -244,7 +259,7 @@ export async function mintWhenOpen(
           label,
           price: priceTxt,
           openAt: win.startTime,
-          wib: fmtWIB(win.startTime),
+          wib: fmtWAT(win.startTime),
         });
       }
     } catch {
@@ -255,7 +270,12 @@ export async function mintWhenOpen(
     try {
       const win = await resolveOpenWindow(target);
       if (win) {
-        openAt = win.startTime;
+        fallbackOpenAt = win.startTime;
+        openAt = pickEffectiveOpenAt({
+          requestedOpenAt: openAt,
+          eligibleOpenAt: eligibleStage?.startTime ?? null,
+          fallbackOpenAt,
+        });
         endAt = win.endTime;
       }
     } catch {
@@ -266,7 +286,7 @@ export async function mintWhenOpen(
   const nowSec = () => Math.floor(Date.now() / 1000);
   if (openAt != null && endAt > 0 && nowSec() >= endAt) {
     throw new Error(
-      `The stage has ended (closes ${fmtWIB(endAt)}) — Nothing can be minted`
+      `The stage has ended (closes ${fmtWAT(endAt)}) — Nothing can be minted`
     );
   }
 
@@ -282,7 +302,7 @@ export async function mintWhenOpen(
       if (remainingMs <= HOT_LEAD_MS) break;
 
       const chunk = Math.min(remainingMs - HOT_LEAD_MS, REFRESH_MS);
-      onEvent({ stage: "waiting_open", openAt, wib: fmtWIB(openAt) });
+      onEvent({ stage: "waiting_open", openAt, wib: fmtWAT(openAt) });
       await sleep(chunk);
 
       // Re-probe the SAME source the window came from, so an OpenSea
@@ -302,7 +322,7 @@ export async function mintWhenOpen(
             if (win) {
               if (win.endTime > 0 && nowSec() >= win.endTime) {
                 throw new Error(
-                  `The stage has ended (closes ${fmtWIB(
+                  `The stage has ended (closes ${fmtWAT(
                     win.endTime
                   )}) — Nothing can be minted.`
                 );
@@ -326,7 +346,7 @@ export async function mintWhenOpen(
             if (win) {
               if (win.endTime > 0 && nowSec() >= win.endTime) {
                 throw new Error(
-                  `The stage has ended (closes ${fmtWIB(
+                  `The stage has ended (closes ${fmtWAT(
                     win.endTime
                   )}) — Nothing can be minted.`
                 );
@@ -380,7 +400,7 @@ export async function mintWhenOpen(
     await prewarmOpensea(target, list, onEvent);
   }
 
-  // Start the poll watch-window AFTER the wait, so the full timeout covers the
+  // Start the poll watch-window after the wait, so the full timeout covers the
   // polling phase — never consumed by waiting for open.
   const deadline = Date.now() + timeoutMs;
   onEvent({ stage: "polling", pollMs });

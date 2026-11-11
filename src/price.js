@@ -1,18 +1,18 @@
 // price.js — price detection, parsing, and price protection for mint operations
-import { ethers } from 'ethers';
-import { getProvider } from './chains.js';
-import { detectSeadrop, getPublicDrop, getAllowlistRoot } from './seadrop.js';
-import { checkAllowlist } from './allowlist.js';
-import { getEligibleLists, pickBestList } from './scatter.js';
-import { getDropStages, getEligibleOpenWindow } from './opensea-drop.js';
-import { getSessionCookies } from './opensea-auth.js';
+import { ethers } from "ethers";
+import { getProvider } from "./chains.js";
+import { detectSeadrop, getPublicDrop, getAllowlistRoot } from "./seadrop.js";
+import { checkAllowlist } from "./allowlist.js";
+import { getEligibleLists, pickBestList } from "./scatter.js";
+import { getDropStages, getEligibleOpenWindow } from "./opensea-drop.js";
+import { getSessionCookies } from "./opensea-auth.js";
 
 export const PRICE_READERS = [
-  'function mintPrice() view returns (uint256)',
-  'function price() view returns (uint256)',
-  'function cost() view returns (uint256)',
-  'function PRICE() view returns (uint256)',
-  'function publicSalePrice() view returns (uint256)',
+  "function mintPrice() view returns (uint256)",
+  "function price() view returns (uint256)",
+  "function cost() view returns (uint256)",
+  "function PRICE() view returns (uint256)",
+  "function publicSalePrice() view returns (uint256)",
 ];
 
 // Probe standard price reader functions on a contract.
@@ -22,10 +22,12 @@ export async function detectPrice(contract, provider, amount = 1) {
       const name = sig.match(/function (\w+)/)[1];
       const c = new ethers.Contract(contract, [sig], provider);
       const p = await c[name]();
-      if (typeof p === 'bigint') return p * BigInt(amount);
-    } catch { continue; }
+      if (typeof p === "bigint") return p * BigInt(amount);
+    } catch {
+      continue;
+    }
   }
-  return 0n;
+  return null;
 }
 
 // Extract optional max price specification from command string.
@@ -34,17 +36,20 @@ export async function detectPrice(contract, provider, amount = 1) {
 //   max:free | max:0 | max:0.05/unit | max:0.05total | max:any | max:unlimited
 //   p:0.01 | p=0.01
 export function extractMaxPriceSpec(input) {
-  if (!input || typeof input !== 'string') return { spec: null, rest: input || '' };
-  const valPattern = '((?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:eth)?(?:\\/unit|total)?|free|any|none|unlimited)';
+  if (!input || typeof input !== "string")
+    return { spec: null, rest: input || "" };
+  const valPattern =
+    "((?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:eth)?(?:\\/unit|total)?|free|any|none|unlimited)";
   const re = new RegExp(
     `(?:(?:^|(?<=\\s))(?:--max-price|--maxprice)|\\b(?:max-price|maxprice|max))[:=\\s]+${valPattern}\\b|\\bp[:=]${valPattern}\\b`,
-    'i'
+    "i"
   );
   const m = input.match(re);
   if (!m) return { spec: null, rest: input.trim() };
   const val = m[1] || m[2];
   const rest = (input.slice(0, m.index) + input.slice(m.index + m[0].length))
-    .replace(/\s+/g, ' ').trim();
+    .replace(/\s+/g, " ")
+    .trim();
   return { spec: val.toLowerCase(), rest };
 }
 
@@ -53,21 +58,30 @@ export function extractMaxPriceSpec(input) {
 export function parsePriceSpec(spec, amount = 1) {
   if (!spec) return null;
   const s = String(spec).trim().toLowerCase();
-  if (['any', 'none', 'unlimited'].includes(s)) {
-    return { isUnlimited: true, maxPriceWei: null, maxPriceEth: null, display: 'nonaktif (unlimited)' };
+  if (["any", "none", "unlimited"].includes(s)) {
+    return {
+      isUnlimited: true,
+      maxPriceWei: null,
+      maxPriceEth: null,
+      display: "nonaktif (unlimited)",
+    };
   }
-  if (s === 'free' || s === '0' || s === '0eth') {
+  if (s === "free" || s === "0" || s === "0eth") {
     return {
       isUnlimited: false,
       maxPriceWei: 0n,
-      maxPriceEth: '0',
-      unitPriceEth: '0',
-      display: 'FREE (0 ETH)',
+      maxPriceEth: "0",
+      unitPriceEth: "0",
+      display: "FREE (0 ETH)",
     };
   }
 
-  const isTotal = s.endsWith('total');
-  const clean = s.replace(/eth$/, '').replace(/\/unit$/, '').replace(/total$/, '').trim();
+  const isTotal = s.endsWith("total");
+  const clean = s
+    .replace(/eth$/, "")
+    .replace(/\/unit$/, "")
+    .replace(/total$/, "")
+    .trim();
   const num = Number(clean);
   if (Number.isNaN(num) || num < 0) {
     throw new Error(`format batas harga tidak valid: "${spec}"`);
@@ -83,17 +97,23 @@ export function parsePriceSpec(spec, amount = 1) {
     maxPriceWei: totalWei,
     maxPriceEth: ethers.formatEther(totalWei),
     unitPriceEth: ethers.formatEther(unitWei),
-    display: `${ethers.formatEther(totalWei)} ETH${qty > 1n ? ` (max ${ethers.formatEther(unitWei)} ETH/unit)` : ''}`,
+    display: `${ethers.formatEther(totalWei)} ETH${
+      qty > 1n ? ` (max ${ethers.formatEther(unitWei)} ETH/unit)` : ""
+    }`,
   };
 }
 
 // Assert that actual price does not exceed max allowed price. Throws informative error.
-export function assertPriceProtection({ actualPriceWei, maxPriceWei, context = '' }) {
+export function assertPriceProtection({
+  actualPriceWei,
+  maxPriceWei,
+  context = "",
+}) {
   if (maxPriceWei == null) return;
   if (BigInt(actualPriceWei) > BigInt(maxPriceWei)) {
     const actualEth = ethers.formatEther(actualPriceWei);
     const maxEth = ethers.formatEther(maxPriceWei);
-    const ctx = context ? ` [${context}]` : '';
+    const ctx = context ? ` [${context}]` : "";
     throw new Error(
       `proteksi harga${ctx}: harga mint (${actualEth} ETH) melebihi batas maksimum (${maxEth} ETH)`
     );
@@ -107,32 +127,38 @@ export async function resolveTargetPrice(target, wallet) {
   const amount = target.amount || 1;
 
   // 1. Scatter
-  if (target.source === 'scatter') {
+  if (target.source === "scatter") {
     try {
       const slug = target.scatter?.slug || target.slug;
       const lists = await getEligibleLists(slug, wallet?.address);
       const list = pickBestList(lists);
       if (list) {
-        const unitEth = String(list.token_price || '0');
+        const unitEth = String(list.token_price || "0");
         const unitWei = ethers.parseEther(unitEth);
         const totalWei = unitWei * BigInt(amount);
         return {
           priceWei: totalWei,
           priceEth: ethers.formatEther(totalWei),
           unitPriceEth: unitEth,
-          currency: list.currency_symbol || 'ETH',
+          currency: list.currency_symbol || "ETH",
           source: `scatter "${list.name}"`,
         };
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // 2. OpenSea Drop
-  if (target.source === 'opensea' && target.slug) {
+  if (target.source === "opensea" && target.slug) {
     if (wallet) {
       try {
         const cookie = await getSessionCookies(wallet);
-        const win = await getEligibleOpenWindow(target.slug, wallet.address, cookie);
+        const win = await getEligibleOpenWindow(
+          target.slug,
+          wallet.address,
+          cookie
+        );
         if (win && win.priceUnit != null) {
           const unitWei = ethers.parseEther(String(win.priceUnit));
           const totalWei = unitWei * BigInt(amount);
@@ -140,11 +166,13 @@ export async function resolveTargetPrice(target, wallet) {
             priceWei: totalWei,
             priceEth: ethers.formatEther(totalWei),
             unitPriceEth: String(win.priceUnit),
-            currency: win.symbol || 'ETH',
-            source: `opensea ${win.stageType || 'stage'} #${win.stageIndex}`,
+            currency: win.symbol || "ETH",
+            source: `opensea ${win.stageType || "stage"} #${win.stageIndex}`,
           };
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     try {
       const drop = await getDropStages(target.slug);
@@ -156,11 +184,13 @@ export async function resolveTargetPrice(target, wallet) {
           priceWei: totalWei,
           priceEth: ethers.formatEther(totalWei),
           unitPriceEth: String(s.priceUnit ?? 0),
-          currency: s.symbol || 'ETH',
+          currency: s.symbol || "ETH",
           source: `opensea stage #${s.stageIndex}`,
         };
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // 3. Seadrop
@@ -171,15 +201,27 @@ export async function resolveTargetPrice(target, wallet) {
       let src = `seadrop ${sd.version} public`;
       if (wallet) {
         try {
-          const root = await getAllowlistRoot(sd.seadrop, target.contract, provider);
+          const root = await getAllowlistRoot(
+            sd.seadrop,
+            target.contract,
+            provider
+          );
           if (root) {
-            const al = await checkAllowlist(sd.seadrop, target.contract, wallet.address, provider, root);
+            const al = await checkAllowlist(
+              sd.seadrop,
+              target.contract,
+              wallet.address,
+              provider,
+              root
+            );
             if (al.eligible && al.mintParams?.[0] != null) {
               unitPriceWei = al.mintParams[0];
               src = `seadrop ${sd.version} allowlist`;
             }
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
       if (unitPriceWei == null) {
         const drop = await getPublicDrop(sd.seadrop, target.contract, provider);
@@ -191,22 +233,25 @@ export async function resolveTargetPrice(target, wallet) {
           priceWei: totalWei,
           priceEth: ethers.formatEther(totalWei),
           unitPriceEth: ethers.formatEther(unitPriceWei),
-          currency: 'ETH',
+          currency: "ETH",
           source: src,
         };
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // 4. Generic Contract
   try {
     const totalWei = await detectPrice(target.contract, provider, amount);
+    if (totalWei == null) return null;
     return {
       priceWei: totalWei,
       priceEth: ethers.formatEther(totalWei),
       unitPriceEth: ethers.formatEther(totalWei / BigInt(amount)),
-      currency: 'ETH',
-      source: 'contract',
+      currency: "ETH",
+      source: "contract",
     };
   } catch {
     return null;

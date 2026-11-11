@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mintWhenOpen, rateLimitDelayMs } from "../src/schedule.js";
+import {
+  mintWhenOpen,
+  pickEffectiveOpenAt,
+  rateLimitDelayMs,
+} from "../src/schedule.js";
+import { fmtWAT } from "../src/time.js";
+import { detectPrice } from "../src/price.js";
+import { getOpenSeaBuildOrder } from "../src/mint.js";
 import { parseRetryAfter } from "../src/opensea-drop.js";
 
 const target = {
@@ -16,6 +23,30 @@ test("parses Retry-After seconds and HTTP dates", () => {
   assert.equal(parseRetryAfter("2.5", now), 2500);
   assert.equal(parseRetryAfter("Wed, 11 Nov 2026 12:00:04 GMT", now), 4000);
   assert.equal(parseRetryAfter("invalid", now), null);
+});
+
+test("formats a display timestamp using the configured timezone", () => {
+  const unixSec = Math.floor(Date.parse("2026-11-11T12:00:00Z") / 1000);
+  const previous = process.env.TIMEZONE;
+  process.env.TIMEZONE = "UTC";
+  try {
+    assert.equal(fmtWAT(unixSec), "Wed, 11 Nov 2026 12:00 UTC");
+  } finally {
+    if (previous === undefined) delete process.env.TIMEZONE;
+    else process.env.TIMEZONE = previous;
+  }
+});
+
+test("does not treat an unknown contract price as free", async () => {
+  const provider = {
+    call: async () => {
+      throw new Error("no code");
+    },
+  };
+  assert.equal(
+    await detectPrice("0x0000000000000000000000000000000000000001", provider),
+    null
+  );
 });
 
 test("uses server retry delay or capped exponential jitter", () => {
@@ -69,6 +100,34 @@ test("waits for Retry-After after a 429, then retries", async () => {
     events.find((event) => event.stage === "rate_limited")?.delayMs,
     1800
   );
+});
+
+test("prefers an earlier eligible OpenSea stage over a later scheduled time", () => {
+  const requested = 1_700_000_100;
+  const eligible = 1_700_000_050;
+  const fallback = 1_700_000_200;
+
+  assert.equal(
+    pickEffectiveOpenAt({
+      requestedOpenAt: requested,
+      eligibleOpenAt: eligible,
+      fallbackOpenAt: fallback,
+    }),
+    eligible
+  );
+  assert.equal(
+    pickEffectiveOpenAt({
+      requestedOpenAt: requested,
+      eligibleOpenAt: null,
+      fallbackOpenAt: fallback,
+    }),
+    requested
+  );
+});
+
+test("uses the authenticated OpenSea mint path before public fallback when a session is warm", () => {
+  assert.deepEqual(getOpenSeaBuildOrder(true), ["authenticated", "public"]);
+  assert.deepEqual(getOpenSeaBuildOrder(false), ["public", "authenticated"]);
 });
 
 test("stops immediately when OpenSea reports allocation exhausted", async () => {

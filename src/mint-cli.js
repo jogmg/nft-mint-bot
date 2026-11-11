@@ -43,12 +43,10 @@ function logEvent(ev) {
   const w = ev.wallet ? ` {${ev.wallet.slice(0, 8)}}` : "";
   switch (ev.stage) {
     case "scheduled":
-      console.log(
-        `[SCHED]  ${ev.wib} (tunggu ${fmtDuration(ev.waitMs / 1000)})`
-      );
+      console.log(`[SCHED]  ${ev.wib} (wait ${fmtDuration(ev.waitMs / 1000)})`);
       break;
     case "waiting_open":
-      console.log(`[WAIT]   buka on-chain ${ev.wib}`);
+      console.log(`[WAIT]   open on-chain ${ev.wib}`);
       break;
     case "polling":
       console.log(`[POLL]   every ${ev.pollMs}ms until open`);
@@ -127,7 +125,7 @@ async function main() {
       "usage: node src/mint-cli.js [--at <time>] [--when-open] [--wallets all|N|1,2] [--max-price <price>] <url|contract> [chain] [amount] [max:price]"
     );
     console.error(
-      '  --at <time>          ISO 8601, unix, "in 5m", "30s", or "HH:MM" (WIB)'
+      '  --at <time>          ISO 8601, unix, "in 5m", "30s", or "HH:MM" (WAT)'
     );
     console.error(
       "  --when-open          poll on-chain open time, mint the instant it opens (auto-locks price)"

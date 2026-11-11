@@ -13,7 +13,7 @@ import { checkAllowlist } from "./allowlist.js";
 import { getEligibleLists, pickBestList, buildScatterMint } from "./scatter.js";
 import { buildOpenseaMint, explainOpenseaError } from "./opensea-drop.js";
 import { getSessionCookies } from "./opensea-auth.js";
-import { fmtWIB } from "./time.js";
+import { fmtWAT } from "./time.js";
 import { PRICE_READERS, detectPrice, assertPriceProtection } from "./price.js";
 
 // Ordered by specificity. Protocol-tagged entries are handled specially.
@@ -113,6 +113,10 @@ function parseRevert(e) {
   );
 }
 
+export function getOpenSeaBuildOrder(hasSession) {
+  return hasSession ? ["authenticated", "public"] : ["public", "authenticated"];
+}
+
 // Mint one target with one wallet. `onEvent` receives progress updates for UIs.
 // `opts` can include maxPriceWei for price change protection.
 export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
@@ -179,9 +183,9 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
       onEvent({ stage: "allowlist", eligible: true, wallet: signer.address });
       if (!built.active) {
         throw new Error(
-          `seadrop ${sd.version} allowlist: not active yet (opens ${fmtWIB(
+          `seadrop ${sd.version} allowlist: not active yet (opens ${fmtWAT(
             built.startTime
-          )}, closes ${built.endTime ? fmtWIB(built.endTime) : "no limit"})`
+          )}, closes ${built.endTime ? fmtWAT(built.endTime) : "no limit"})`
         );
       }
       txRequest = {
@@ -231,10 +235,10 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
       if (!built.active) {
         const st = await tokenStatus(target.contract, provider);
         throw new Error(
-          `seadrop ${sd.version}: public mint not active yet (opens ${fmtWIB(
+          `seadrop ${sd.version}: public mint not active yet (opens ${fmtWAT(
             built.drop.startTime
           )}, closes ${
-            built.drop.endTime ? fmtWIB(built.drop.endTime) : "no limit"
+            built.drop.endTime ? fmtWAT(built.drop.endTime) : "no limit"
           }, maxSupply=${st.maxSupply ?? "?"})`
         );
       }
@@ -445,38 +449,46 @@ async function mintOpenseaDrop(
     quantity: amount,
   };
 
-  // Public stages need no login: try building the tx unauthenticated first so
-  // public mints pay zero login latency. Only if OpenSea rejects (drop gated /
-  // not eligible) do we log in (SIWE) and retry — that path is for signed/GTD.
-  let built;
+  // Public stages can be built without a session, but a warm OpenSea session is
+  // much cheaper than redoing the unauthenticated check every poll. When the
+  // wallet is already authenticated, prefer the authenticated mint path first,
+  // then fall back to the public route only if the signed route genuinely fails.
+  let cookie = null;
   try {
-    built = await buildOpenseaMint(buildArgs);
-  } catch (firstErr) {
-    if (firstErr.status === 429) throw firstErr;
-    // Retry authenticated. A cached session (pre-warmed) makes this ~0ms.
-    let cookie = null;
+    cookie = await getSessionCookies(signer);
+    onEvent({
+      stage: "allowlist",
+      eligible: true,
+      wallet: signer.address,
+      reason: "opensea session active",
+    });
+  } catch (e) {
+    if (e.status === 429) throw e;
+  }
+
+  let built;
+  let lastErr;
+  for (const mode of getOpenSeaBuildOrder(Boolean(cookie))) {
     try {
-      cookie = await getSessionCookies(signer);
-      onEvent({
-        stage: "allowlist",
-        eligible: true,
-        wallet: signer.address,
-        reason: "opensea session active",
-      });
-    } catch (e) {
-      // Login itself failed → surface the original (public) error, it's clearer.
-      if (e.status === 429) throw e;
-      throw firstErr;
+      built =
+        mode === "authenticated"
+          ? await buildOpenseaMint({ ...buildArgs, cookie })
+          : await buildOpenseaMint(buildArgs);
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (err.status === 429) throw err;
+      if (mode === "authenticated" && cookie) continue;
+      break;
     }
-    try {
-      built = await buildOpenseaMint({ ...buildArgs, cookie });
-    } catch (authErr) {
-      if (authErr.status === 429) throw authErr;
-      const { meaning } = explainOpenseaError(authErr.message);
-      const error = new Error(`opensea: ${meaning}`);
-      error.code = authErr.code || explainOpenseaError(authErr.message).code;
-      throw error;
-    }
+  }
+
+  if (!built) {
+    const err = lastErr || new Error("opensea: no mint transaction built");
+    const { meaning } = explainOpenseaError(err.message);
+    const error = new Error(`opensea: ${meaning}`);
+    error.code = err.code || explainOpenseaError(err.message).code;
+    throw error;
   }
 
   const stageLabel =
