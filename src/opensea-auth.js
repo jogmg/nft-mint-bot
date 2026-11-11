@@ -12,41 +12,61 @@
 //                                                   → sets access_token cookie
 // The access_token is a JWT; we cache it per address and re-login when exp-60s
 // has passed.
-import { ethers } from 'ethers';
+import { ethers } from "ethers";
 
-const BASE = 'https://opensea.io/__api/auth';
-const DOMAIN = 'opensea.io';
-const URI = 'https://opensea.io/';
+const BASE = "https://opensea.io/__api/auth";
+const DOMAIN = "opensea.io";
+const URI = "https://opensea.io/";
 const STATEMENT =
-  'Click to sign in and accept the OpenSea Terms of Service (https://opensea.io/tos) and Privacy Policy (https://opensea.io/privacy).';
+  "Click to sign in and accept the OpenSea Terms of Service (https://opensea.io/tos) and Privacy Policy (https://opensea.io/privacy).";
 // connectorId observed in the web app. The server validates the signature, not
 // the wallet brand, so a known-good value is fine for a headless signer.
-const CONNECTOR_ID = 'io.rabby';
+const CONNECTOR_ID = "io.rabby";
 
 const BROWSER_HEADERS = {
-  'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36',
-  origin: 'https://opensea.io',
-  referer: 'https://opensea.io/',
+  "user-agent":
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
+  origin: "https://opensea.io",
+  referer: "https://opensea.io/",
 };
 
 // Per-address session cache: address(lower) → { cookies:Map, token, exp }.
 const sessions = new Map();
 
+function parseRetryAfter(value) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0)
+    return Math.ceil(seconds * 1000);
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : Math.max(0, timestamp - Date.now());
+}
+
+function authHttpError(message, response) {
+  const error = new Error(message);
+  error.status = response.status;
+  error.retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
+  return error;
+}
+
 // Parse Set-Cookie header(s) into name→value pairs, merged into a jar.
 function absorbCookies(jar, res) {
   // Node fetch merges multiple Set-Cookie into one; getSetCookie() splits them.
-  const raw = typeof res.headers.getSetCookie === 'function'
-    ? res.headers.getSetCookie()
-    : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')] : []);
+  const raw =
+    typeof res.headers.getSetCookie === "function"
+      ? res.headers.getSetCookie()
+      : res.headers.get("set-cookie")
+      ? [res.headers.get("set-cookie")]
+      : [];
   for (const line of raw) {
-    const [pair] = line.split(';');
-    const eq = pair.indexOf('=');
+    const [pair] = line.split(";");
+    const eq = pair.indexOf("=");
     if (eq > 0) jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
   }
 }
 
 function cookieHeader(jar) {
-  return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
+  return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
 // Build the exact EIP-4361 SIWE message string the OpenSea web app signs.
@@ -69,7 +89,9 @@ function buildSiweMessage({ address, nonce, issuedAt, chainId = 1 }) {
 // Decode a JWT payload without verification (we only need the exp claim).
 function jwtExp(token) {
   try {
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64").toString()
+    );
     return Number(payload.exp) || 0;
   } catch {
     return 0;
@@ -78,13 +100,17 @@ function jwtExp(token) {
 
 async function fetchNonce(jar) {
   const r = await fetch(`${BASE}/siwe/nonce`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', cookie: cookieHeader(jar), ...BROWSER_HEADERS },
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: cookieHeader(jar),
+      ...BROWSER_HEADERS,
+    },
   });
-  if (!r.ok) throw new Error(`siwe nonce ${r.status}`);
+  if (!r.ok) throw authHttpError(`siwe nonce ${r.status}`, r);
   absorbCookies(jar, r);
   const j = await r.json();
-  if (!j?.nonce) throw new Error('siwe nonce: missing nonce');
+  if (!j?.nonce) throw new Error("siwe nonce: missing nonce");
   return j.nonce;
 }
 
@@ -96,7 +122,7 @@ async function login(wallet) {
   // Tell OpenSea which wallet this session is for, BEFORE the nonce request.
   // The eligibility resolver keys off this cookie; without it isEligible is
   // null even for a valid authenticated session (learned from osnm-z).
-  jar.set('connected-account-server-hint', address.toLowerCase());
+  jar.set("connected-account-server-hint", address.toLowerCase());
 
   const nonce = await fetchNonce(jar);
   const issuedAt = new Date().toISOString();
@@ -110,26 +136,35 @@ async function login(wallet) {
     address,
     statement: STATEMENT,
     uri: URI,
-    version: '1',
-    chainId: '1',
+    version: "1",
+    chainId: "1",
     nonce,
     issuedAt,
-    accountType: 'Ethereum',
+    accountType: "Ethereum",
   };
 
   const r = await fetch(`${BASE}/siwe/verify`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', cookie: cookieHeader(jar), ...BROWSER_HEADERS },
-    body: JSON.stringify({ message: messageObj, signature, chainArch: 'EVM', connectorId: CONNECTOR_ID }),
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: cookieHeader(jar),
+      ...BROWSER_HEADERS,
+    },
+    body: JSON.stringify({
+      message: messageObj,
+      signature,
+      chainArch: "EVM",
+      connectorId: CONNECTOR_ID,
+    }),
   });
   if (!r.ok) {
-    const txt = await r.text().catch(() => '');
-    throw new Error(`siwe verify ${r.status}: ${txt.slice(0, 200)}`);
+    const txt = await r.text().catch(() => "");
+    throw authHttpError(`siwe verify ${r.status}: ${txt.slice(0, 200)}`, r);
   }
   absorbCookies(jar, r);
 
-  const token = jar.get('access_token');
-  if (!token) throw new Error('siwe verify: no access_token cookie returned');
+  const token = jar.get("access_token");
+  if (!token) throw new Error("siwe verify: no access_token cookie returned");
   return { cookies: jar, token, exp: jwtExp(token) };
 }
 
@@ -137,15 +172,23 @@ async function login(wallet) {
 // cookie (POST /__api/auth/session/refresh). Returns an updated session or
 // null when refresh isn't possible (no prior session / refresh rejected).
 async function tryRefresh(cached) {
-  if (!cached?.cookies?.get('refresh_token')) return null;
+  if (!cached?.cookies?.get("refresh_token")) return null;
   const jar = new Map(cached.cookies); // clone; refresh may rotate cookies
   const r = await fetch(`${BASE}/session/refresh`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', cookie: cookieHeader(jar), ...BROWSER_HEADERS },
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: cookieHeader(jar),
+      ...BROWSER_HEADERS,
+    },
   });
-  if (!r.ok) return null;
+  if (!r.ok) {
+    if (r.status === 429)
+      throw authHttpError(`siwe session refresh ${r.status}`, r);
+    return null;
+  }
   absorbCookies(jar, r);
-  const token = jar.get('access_token');
+  const token = jar.get("access_token");
   if (!token) return null;
   return { cookies: jar, token, exp: jwtExp(token) };
 }
@@ -162,7 +205,10 @@ export async function getSessionCookies(wallet) {
 
   // Near/after expiry: try a lightweight refresh before a full re-login.
   if (cached) {
-    const refreshed = await tryRefresh(cached).catch(() => null);
+    const refreshed = await tryRefresh(cached).catch((error) => {
+      if (error.status === 429) throw error;
+      return null;
+    });
     if (refreshed) {
       sessions.set(key, refreshed);
       return cookieHeader(refreshed.cookies);

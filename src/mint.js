@@ -1,33 +1,48 @@
 // mint.js — universal mint engine: detect fn → price → gas → simulate → send → report
-import { ethers } from 'ethers';
-import { getProvider, explorerUrl } from './chains.js';
-import { detectSeadrop, buildSeadropMint, buildAllowListMint, getAllowlistRoot, getMintMechanisms, tokenStatus } from './seadrop.js';
-import { checkAllowlist } from './allowlist.js';
-import { getEligibleLists, pickBestList, buildScatterMint } from './scatter.js';
-import { buildOpenseaMint, explainOpenseaError } from './opensea-drop.js';
-import { getSessionCookies } from './opensea-auth.js';
-import { fmtWIB } from './time.js';
-import { PRICE_READERS, detectPrice, assertPriceProtection } from './price.js';
+import { ethers } from "ethers";
+import { getProvider, explorerUrl } from "./chains.js";
+import {
+  detectSeadrop,
+  buildSeadropMint,
+  buildAllowListMint,
+  getAllowlistRoot,
+  getMintMechanisms,
+  tokenStatus,
+} from "./seadrop.js";
+import { checkAllowlist } from "./allowlist.js";
+import { getEligibleLists, pickBestList, buildScatterMint } from "./scatter.js";
+import { buildOpenseaMint, explainOpenseaError } from "./opensea-drop.js";
+import { getSessionCookies } from "./opensea-auth.js";
+import { fmtWIB } from "./time.js";
+import { PRICE_READERS, detectPrice, assertPriceProtection } from "./price.js";
 
 // Ordered by specificity. Protocol-tagged entries are handled specially.
 const MINT_SIGNATURES = [
-  { sig: 'mintPublic(uint256)', args: ['amount'] },
-  { sig: 'publicMint(uint256)', args: ['amount'] },
-  { sig: 'mint(uint256)', args: ['amount'] },
-  { sig: 'claim(uint256)', args: ['amount'] },
-  { sig: 'mint(address,uint256)', args: ['to', 'amount'] },
-  { sig: 'claim(address,uint256)', args: ['to', 'amount'] },
-  { sig: 'mint(address,uint256,uint256,bytes)', args: ['to', 'id', 'amount', 'data'] },
-  { sig: 'mint()', args: [] },
+  { sig: "mintPublic(uint256)", args: ["amount"] },
+  { sig: "publicMint(uint256)", args: ["amount"] },
+  { sig: "mint(uint256)", args: ["amount"] },
+  { sig: "claim(uint256)", args: ["amount"] },
+  { sig: "mint(address,uint256)", args: ["to", "amount"] },
+  { sig: "claim(address,uint256)", args: ["to", "amount"] },
+  {
+    sig: "mint(address,uint256,uint256,bytes)",
+    args: ["to", "id", "amount", "data"],
+  },
+  { sig: "mint()", args: [] },
 ];
 
 function synthArg(name, addr, amount) {
   switch (name) {
-    case 'to': return addr;
-    case 'amount': return BigInt(amount || 1);
-    case 'id': return 0n;
-    case 'data': return '0x';
-    default: return 0n;
+    case "to":
+      return addr;
+    case "amount":
+      return BigInt(amount || 1);
+    case "id":
+      return 0n;
+    case "data":
+      return "0x";
+    default:
+      return 0n;
   }
 }
 
@@ -39,19 +54,27 @@ function buildArgs(fn, addr, amount) {
 // function exists but needs payment/proof — still a match.
 async function detectMintFunction(contract, signer, amount) {
   for (const fn of MINT_SIGNATURES) {
-    const name = fn.sig.split('(')[0];
+    const name = fn.sig.split("(")[0];
     const iface = new ethers.Interface([`function ${fn.sig} payable`]);
-    const data = iface.encodeFunctionData(name, buildArgs(fn, signer.address, amount));
+    const data = iface.encodeFunctionData(
+      name,
+      buildArgs(fn, signer.address, amount)
+    );
     try {
-      await signer.provider.call({ to: contract, from: signer.address, data, value: 0 });
+      await signer.provider.call({
+        to: contract,
+        from: signer.address,
+        data,
+        value: 0,
+      });
       return fn;
     } catch (e) {
       const errData = e?.data ?? e?.info?.error?.data;
-      if (errData && errData !== '0x') return fn; // exists, reverted on state/payment
+      if (errData && errData !== "0x") return fn; // exists, reverted on state/payment
       continue;
     }
   }
-  throw new Error('no recognized mint function');
+  throw new Error("no recognized mint function");
 }
 
 // Estimate gas with a 20% buffer and derive EIP-1559 fees with headroom.
@@ -59,27 +82,35 @@ async function autoGas(provider, txRequest) {
   const feeData = await provider.getFeeData();
   let gasLimit;
   try {
-    gasLimit = (await provider.estimateGas(txRequest)) * 120n / 100n;
+    gasLimit = ((await provider.estimateGas(txRequest)) * 120n) / 100n;
   } catch (e) {
-    throw new Error(`gas estimate failed (likely revert): ${e.shortMessage || e.message}`);
+    throw new Error(
+      `gas estimate failed (likely revert): ${e.shortMessage || e.message}`
+    );
   }
 
   // Legacy-fee chains (no maxFeePerGas): use gasPrice.
   if (feeData.maxFeePerGas == null) {
-    const gasPrice = feeData.gasPrice ?? ethers.parseUnits('1', 'gwei');
+    const gasPrice = feeData.gasPrice ?? ethers.parseUnits("1", "gwei");
     return { gasLimit, gasPrice };
   }
 
   const priorityFee = feeData.maxPriorityFeePerGas
-    ? feeData.maxPriorityFeePerGas * 110n / 100n
-    : ethers.parseUnits('1.5', 'gwei');
+    ? (feeData.maxPriorityFeePerGas * 110n) / 100n
+    : ethers.parseUnits("1.5", "gwei");
   const base = feeData.maxFeePerGas;
   const maxFee = base * 2n + priorityFee;
   return { gasLimit, maxPriorityFeePerGas: priorityFee, maxFeePerGas: maxFee };
 }
 
 function parseRevert(e) {
-  return e?.shortMessage || e?.reason || e?.info?.error?.message || e?.message || 'unknown revert';
+  return (
+    e?.shortMessage ||
+    e?.reason ||
+    e?.info?.error?.message ||
+    e?.message ||
+    "unknown revert"
+  );
 }
 
 // Mint one target with one wallet. `onEvent` receives progress updates for UIs.
@@ -89,19 +120,31 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
   const signer = wallet.connect(provider);
   const amount = target.amount || 1;
 
-  onEvent({ stage: 'target', contract: target.contract, chain: target.chain, amount });
+  onEvent({
+    stage: "target",
+    contract: target.contract,
+    chain: target.chain,
+    amount,
+  });
 
   // Scatter.art collections use a custom mint entrypoint; the API builds the
   // tx (proof + signature). Handle entirely here, then return.
-  if (target.source === 'scatter') {
+  if (target.source === "scatter") {
     return await mintScatter(target, signer, provider, amount, onEvent, opts);
   }
 
   // OpenSea Drops (OS2): the mint tx is generated server-side via GraphQL
   // (relayer + requestId). Only route here when we have the collection slug
   // (collection URL). Assets URLs without a slug fall through to Seadrop.
-  if (target.source === 'opensea' && target.slug) {
-    return await mintOpenseaDrop(target, signer, provider, amount, onEvent, opts);
+  if (target.source === "opensea" && target.slug) {
+    return await mintOpenseaDrop(
+      target,
+      signer,
+      provider,
+      amount,
+      onEvent,
+      opts
+    );
   }
 
   // Prefer Seadrop path when the token is Seadrop-managed.
@@ -116,7 +159,13 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
     // the public drop. This avoids blasting mintPublic while an allowlist-only
     // window is open (which would revert and burn gas).
     const root = await getAllowlistRoot(sd.seadrop, target.contract, provider);
-    const al = await checkAllowlist(sd.seadrop, target.contract, signer.address, provider, root);
+    const al = await checkAllowlist(
+      sd.seadrop,
+      target.contract,
+      signer.address,
+      provider,
+      root
+    );
 
     if (al.eligible) {
       const built = await buildAllowListMint({
@@ -127,13 +176,20 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
         proof: al.proof,
         provider,
       });
-      onEvent({ stage: 'allowlist', eligible: true, wallet: signer.address });
+      onEvent({ stage: "allowlist", eligible: true, wallet: signer.address });
       if (!built.active) {
         throw new Error(
-          `seadrop ${sd.version} allowlist: not active yet (opens ${fmtWIB(built.startTime)}, closes ${built.endTime ? fmtWIB(built.endTime) : 'no limit'})`,
+          `seadrop ${sd.version} allowlist: not active yet (opens ${fmtWIB(
+            built.startTime
+          )}, closes ${built.endTime ? fmtWIB(built.endTime) : "no limit"})`
         );
       }
-      txRequest = { to: built.to, from: signer.address, data: built.data, value: built.value };
+      txRequest = {
+        to: built.to,
+        from: signer.address,
+        data: built.data,
+        value: built.value,
+      };
       fnLabel = `seadrop ${sd.version} mintAllowList × ${amount}`;
       price = built.value;
     } else {
@@ -141,12 +197,28 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
       // mints (eligibility off-chain, needs OpenSea's signature) — warn so the
       // user isn't misled into thinking a public fallback covers their spot.
       if (al.hasAllowlist) {
-        onEvent({ stage: 'allowlist', eligible: false, reason: al.reason, wallet: signer.address });
+        onEvent({
+          stage: "allowlist",
+          eligible: false,
+          reason: al.reason,
+          wallet: signer.address,
+        });
       } else {
-        const mech = await getMintMechanisms(sd.seadrop, target.contract, provider);
+        const mech = await getMintMechanisms(
+          sd.seadrop,
+          target.contract,
+          provider
+        );
         if (mech.signers.length || mech.tokenGated.length) {
-          const kind = mech.signers.length ? 'signed (needs OpenSea signature)' : 'token-gated';
-          onEvent({ stage: 'allowlist', eligible: false, wallet: signer.address, reason: `${kind} — falling back to public` });
+          const kind = mech.signers.length
+            ? "signed (needs OpenSea signature)"
+            : "token-gated";
+          onEvent({
+            stage: "allowlist",
+            eligible: false,
+            wallet: signer.address,
+            reason: `${kind} — falling back to public`,
+          });
         }
       }
       const built = await buildSeadropMint({
@@ -159,25 +231,46 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
       if (!built.active) {
         const st = await tokenStatus(target.contract, provider);
         throw new Error(
-          `seadrop ${sd.version}: public mint not active yet (opens ${fmtWIB(built.drop.startTime)}, closes ${built.drop.endTime ? fmtWIB(built.drop.endTime) : 'no limit'}, maxSupply=${st.maxSupply ?? '?'})`,
+          `seadrop ${sd.version}: public mint not active yet (opens ${fmtWIB(
+            built.drop.startTime
+          )}, closes ${
+            built.drop.endTime ? fmtWIB(built.drop.endTime) : "no limit"
+          }, maxSupply=${st.maxSupply ?? "?"})`
         );
       }
-      txRequest = { to: built.to, from: signer.address, data: built.data, value: built.value };
+      txRequest = {
+        to: built.to,
+        from: signer.address,
+        data: built.data,
+        value: built.value,
+      };
       fnLabel = `seadrop ${sd.version} mintPublic × ${amount}`;
       price = built.value;
     }
   } else {
     const fn = await detectMintFunction(target.contract, signer, amount);
     price = await detectPrice(target.contract, provider, amount);
-    const name = fn.sig.split('(')[0];
+    const name = fn.sig.split("(")[0];
     const iface = new ethers.Interface([`function ${fn.sig} payable`]);
-    const data = iface.encodeFunctionData(name, buildArgs(fn, signer.address, amount));
-    txRequest = { to: target.contract, from: signer.address, data, value: price };
+    const data = iface.encodeFunctionData(
+      name,
+      buildArgs(fn, signer.address, amount)
+    );
+    txRequest = {
+      to: target.contract,
+      from: signer.address,
+      data,
+      value: price,
+    };
     fnLabel = `${fn.sig} × ${amount}`;
   }
 
-  onEvent({ stage: 'detected', fn: fnLabel, price: ethers.formatEther(price) });
-  assertPriceProtection({ actualPriceWei: price, maxPriceWei: opts.maxPriceWei, context: fnLabel });
+  onEvent({ stage: "detected", fn: fnLabel, price: ethers.formatEther(price) });
+  assertPriceProtection({
+    actualPriceWei: price,
+    maxPriceWei: opts.maxPriceWei,
+    context: fnLabel,
+  });
 
   // Simulate before broadcast.
   try {
@@ -187,10 +280,14 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
   }
 
   const gas = await autoGas(provider, txRequest);
-  onEvent({ stage: 'gas', gasLimit: gas.gasLimit.toString() });
+  onEvent({ stage: "gas", gasLimit: gas.gasLimit.toString() });
 
   const tx = await signer.sendTransaction({ ...txRequest, ...gas });
-  onEvent({ stage: 'sent', hash: tx.hash, explorer: explorerUrl(target.chain, tx.hash) });
+  onEvent({
+    stage: "sent",
+    hash: tx.hash,
+    explorer: explorerUrl(target.chain, tx.hash),
+  });
 
   const receipt = await tx.wait();
   const result = {
@@ -202,37 +299,53 @@ export async function mintOne(target, wallet, onEvent = () => {}, opts = {}) {
     hash: tx.hash,
     block: receipt.blockNumber,
     gasUsed: receipt.gasUsed.toString(),
-    status: receipt.status === 1 ? 'success' : 'reverted',
+    status: receipt.status === 1 ? "success" : "reverted",
     explorer: explorerUrl(target.chain, tx.hash),
   };
-  onEvent({ stage: 'done', ...result });
+  onEvent({ stage: "done", ...result });
   return result;
 }
 
 // Minimal ERC20 ABI for allowance/approve when a Scatter list is token-priced.
 const ERC20_ABI = [
-  'function allowance(address owner, address spender) view returns (uint256)',
-  'function approve(address spender, uint256 amount) returns (bool)',
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
 ];
 
 // Mint from a Scatter.art collection. Resolves the wallet's eligible lists,
 // picks the best (cheapest native, else token), asks the API to build the tx,
 // approves any ERC20 payment, then simulates → sends → waits.
-async function mintScatter(target, signer, provider, amount, onEvent, opts = {}) {
+async function mintScatter(
+  target,
+  signer,
+  provider,
+  amount,
+  onEvent,
+  opts = {}
+) {
   const slug = target.scatter?.slug || target.slug;
   const col = target.scatter;
 
   const lists = await getEligibleLists(slug, signer.address);
   const list = pickBestList(lists);
   if (!list) {
-    throw new Error(`scatter: wallet ${signer.address.slice(0, 10)}… not eligible for any mint list`);
+    throw new Error(
+      `scatter: wallet ${signer.address.slice(
+        0,
+        10
+      )}… not eligible for any mint list`
+    );
   }
-  const listPriceEth = ethers.formatEther(ethers.parseUnits(String(list.token_price || '0'), 18));
+  const listPriceEth = ethers.formatEther(
+    ethers.parseUnits(String(list.token_price || "0"), 18)
+  );
   onEvent({
-    stage: 'allowlist',
+    stage: "allowlist",
     eligible: true,
     wallet: signer.address,
-    reason: `list "${list.name}" @ ${list.token_price} ${list.currency_symbol || ''}`.trim(),
+    reason: `list "${list.name}" @ ${list.token_price} ${
+      list.currency_symbol || ""
+    }`.trim(),
   });
 
   const built = await buildScatterMint({
@@ -244,8 +357,16 @@ async function mintScatter(target, signer, provider, amount, onEvent, opts = {})
   });
 
   const fnLabel = `scatter "${list.name}" × ${amount}`;
-  onEvent({ stage: 'detected', fn: fnLabel, price: ethers.formatEther(built.value) });
-  assertPriceProtection({ actualPriceWei: built.value, maxPriceWei: opts.maxPriceWei, context: fnLabel });
+  onEvent({
+    stage: "detected",
+    fn: fnLabel,
+    price: ethers.formatEther(built.value),
+  });
+  assertPriceProtection({
+    actualPriceWei: built.value,
+    maxPriceWei: opts.maxPriceWei,
+    context: fnLabel,
+  });
 
   // Approve any ERC20 payments the mint requires before sending.
   for (const erc20 of built.erc20s) {
@@ -253,13 +374,18 @@ async function mintScatter(target, signer, provider, amount, onEvent, opts = {})
     const need = BigInt(erc20.amount);
     const have = await token.allowance(signer.address, target.contract);
     if (have < need) {
-      onEvent({ stage: 'approve', token: erc20.address, amount: erc20.amount });
+      onEvent({ stage: "approve", token: erc20.address, amount: erc20.amount });
       const atx = await token.approve(target.contract, ethers.MaxUint256);
       await atx.wait();
     }
   }
 
-  const txRequest = { to: built.to, from: signer.address, data: built.data, value: built.value };
+  const txRequest = {
+    to: built.to,
+    from: signer.address,
+    data: built.data,
+    value: built.value,
+  };
 
   // Simulate before broadcast.
   try {
@@ -269,10 +395,14 @@ async function mintScatter(target, signer, provider, amount, onEvent, opts = {})
   }
 
   const gas = await autoGas(provider, txRequest);
-  onEvent({ stage: 'gas', gasLimit: gas.gasLimit.toString() });
+  onEvent({ stage: "gas", gasLimit: gas.gasLimit.toString() });
 
   const tx = await signer.sendTransaction({ ...txRequest, ...gas });
-  onEvent({ stage: 'sent', hash: tx.hash, explorer: explorerUrl(target.chain, tx.hash) });
+  onEvent({
+    stage: "sent",
+    hash: tx.hash,
+    explorer: explorerUrl(target.chain, tx.hash),
+  });
 
   const receipt = await tx.wait();
   const result = {
@@ -284,10 +414,10 @@ async function mintScatter(target, signer, provider, amount, onEvent, opts = {})
     hash: tx.hash,
     block: receipt.blockNumber,
     gasUsed: receipt.gasUsed.toString(),
-    status: receipt.status === 1 ? 'success' : 'reverted',
+    status: receipt.status === 1 ? "success" : "reverted",
     explorer: explorerUrl(target.chain, tx.hash),
   };
-  onEvent({ stage: 'done', ...result });
+  onEvent({ stage: "done", ...result });
   return result;
 }
 
@@ -296,7 +426,14 @@ async function mintScatter(target, signer, provider, amount, onEvent, opts = {})
 // send it directly. Eligibility/signature for signed presale stages is
 // enforced by OpenSea's backend and may require a logged-in session — those
 // fail here with a clear reason (not-eligible / drop-not-minting).
-async function mintOpenseaDrop(target, signer, provider, amount, onEvent, opts = {}) {
+async function mintOpenseaDrop(
+  target,
+  signer,
+  provider,
+  amount,
+  onEvent,
+  opts = {}
+) {
   const slug = target.slug;
 
   const buildArgs = {
@@ -304,7 +441,7 @@ async function mintOpenseaDrop(target, signer, provider, amount, onEvent, opts =
     minterAddress: signer.address,
     contract: target.contract,
     chain: target.chain,
-    tokenId: target.tokenId || '0',
+    tokenId: target.tokenId || "0",
     quantity: amount,
   };
 
@@ -315,32 +452,61 @@ async function mintOpenseaDrop(target, signer, provider, amount, onEvent, opts =
   try {
     built = await buildOpenseaMint(buildArgs);
   } catch (firstErr) {
+    if (firstErr.status === 429) throw firstErr;
     // Retry authenticated. A cached session (pre-warmed) makes this ~0ms.
     let cookie = null;
     try {
       cookie = await getSessionCookies(signer);
-      onEvent({ stage: 'allowlist', eligible: true, wallet: signer.address, reason: 'opensea session active' });
+      onEvent({
+        stage: "allowlist",
+        eligible: true,
+        wallet: signer.address,
+        reason: "opensea session active",
+      });
     } catch (e) {
       // Login itself failed → surface the original (public) error, it's clearer.
-      throw new Error(firstErr.message);
+      if (e.status === 429) throw e;
+      throw firstErr;
     }
     try {
       built = await buildOpenseaMint({ ...buildArgs, cookie });
     } catch (authErr) {
+      if (authErr.status === 429) throw authErr;
       const { meaning } = explainOpenseaError(authErr.message);
-      throw new Error(`opensea: ${meaning}`);
+      const error = new Error(`opensea: ${meaning}`);
+      error.code = authErr.code || explainOpenseaError(authErr.message).code;
+      throw error;
     }
   }
 
-  const stageLabel = built.stageType === 'PUBLIC_SALE' ? 'public'
-    : built.stageType === 'SIGNED_PRESALE' ? 'presale/GTD'
-    : built.stageType === 'MERKLE_PRESALE' ? 'allowlist'
-    : built.stageType || '?';
-  const fnLabel = `opensea ${stageLabel}${built.stageIndex != null ? ` #${built.stageIndex}` : ''}${built.crossChain ? ' (relayer)' : ''} × ${amount}`;
-  onEvent({ stage: 'detected', fn: fnLabel, price: ethers.formatEther(built.value) });
-  assertPriceProtection({ actualPriceWei: built.value, maxPriceWei: opts.maxPriceWei, context: fnLabel });
+  const stageLabel =
+    built.stageType === "PUBLIC_SALE"
+      ? "public"
+      : built.stageType === "SIGNED_PRESALE"
+      ? "presale/GTD"
+      : built.stageType === "MERKLE_PRESALE"
+      ? "allowlist"
+      : built.stageType || "?";
+  const fnLabel = `opensea ${stageLabel}${
+    built.stageIndex != null ? ` #${built.stageIndex}` : ""
+  }${built.crossChain ? " (relayer)" : ""} × ${amount}`;
+  onEvent({
+    stage: "detected",
+    fn: fnLabel,
+    price: ethers.formatEther(built.value),
+  });
+  assertPriceProtection({
+    actualPriceWei: built.value,
+    maxPriceWei: opts.maxPriceWei,
+    context: fnLabel,
+  });
 
-  const txRequest = { to: built.to, from: signer.address, data: built.data, value: built.value };
+  const txRequest = {
+    to: built.to,
+    from: signer.address,
+    data: built.data,
+    value: built.value,
+  };
 
   // Simulate before broadcast.
   try {
@@ -350,10 +516,14 @@ async function mintOpenseaDrop(target, signer, provider, amount, onEvent, opts =
   }
 
   const gas = await autoGas(provider, txRequest);
-  onEvent({ stage: 'gas', gasLimit: gas.gasLimit.toString() });
+  onEvent({ stage: "gas", gasLimit: gas.gasLimit.toString() });
 
   const tx = await signer.sendTransaction({ ...txRequest, ...gas });
-  onEvent({ stage: 'sent', hash: tx.hash, explorer: explorerUrl(target.chain, tx.hash) });
+  onEvent({
+    stage: "sent",
+    hash: tx.hash,
+    explorer: explorerUrl(target.chain, tx.hash),
+  });
 
   const receipt = await tx.wait();
   const result = {
@@ -365,10 +535,10 @@ async function mintOpenseaDrop(target, signer, provider, amount, onEvent, opts =
     hash: tx.hash,
     block: receipt.blockNumber,
     gasUsed: receipt.gasUsed.toString(),
-    status: receipt.status === 1 ? 'success' : 'reverted',
+    status: receipt.status === 1 ? "success" : "reverted",
     explorer: explorerUrl(target.chain, tx.hash),
   };
-  onEvent({ stage: 'done', ...result });
+  onEvent({ stage: "done", ...result });
   return result;
 }
 
@@ -376,7 +546,8 @@ async function mintOpenseaDrop(target, signer, provider, amount, onEvent, opts =
 // own mintOne (independent nonce/simulation). Never rejects — failures are
 // captured per wallet. onEvent is tagged with { wallet } for multi context.
 export async function mintMany(target, wallets, onEvent = () => {}, opts = {}) {
-  if (wallets.length === 1) return [await mintOne(target, wallets[0], onEvent, opts)];
+  if (wallets.length === 1)
+    return [await mintOne(target, wallets[0], onEvent, opts)];
 
   const limit = Math.max(1, opts.concurrency ?? 5);
   const results = new Array(wallets.length);
@@ -390,13 +561,23 @@ export async function mintMany(target, wallets, onEvent = () => {}, opts = {}) {
       try {
         results[i] = await mintOne(target, w, tag, opts);
       } catch (e) {
-        results[i] = { wallet: w.address, status: 'error', error: e.shortMessage || e.message };
-        onEvent({ stage: 'wallet_error', wallet: w.address, error: results[i].error });
+        results[i] = {
+          wallet: w.address,
+          status: "error",
+          error: e.shortMessage || e.message,
+        };
+        onEvent({
+          stage: "wallet_error",
+          wallet: w.address,
+          error: results[i].error,
+        });
       }
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(limit, wallets.length) }, worker));
+  await Promise.all(
+    Array.from({ length: Math.min(limit, wallets.length) }, worker)
+  );
   return results;
 }
 

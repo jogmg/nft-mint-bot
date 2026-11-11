@@ -1,11 +1,11 @@
-import { ethers } from 'ethers';
-import { fmtWIB } from './time.js';
-import { getProvider } from './chains.js';
-import { mintOne, mintMany } from './mint.js';
-import { detectSeadrop, getPublicDrop } from './seadrop.js';
-import { getSessionCookies } from './opensea-auth.js';
-import { getEligibleOpenWindow } from './opensea-drop.js';
-import { resolveTargetPrice, assertPriceProtection } from './price.js';
+import { ethers } from "ethers";
+import { fmtWIB } from "./time.js";
+import { getProvider } from "./chains.js";
+import { mintOne, mintMany } from "./mint.js";
+import { detectSeadrop, getPublicDrop } from "./seadrop.js";
+import { getSessionCookies } from "./opensea-auth.js";
+import { getEligibleOpenWindow } from "./opensea-drop.js";
+import { resolveTargetPrice, assertPriceProtection } from "./price.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -14,16 +14,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // phase means the mint moment only pays for tx-build + send. Best-effort:
 // a failed warm-up is retried lazily by mintOne at mint time.
 async function prewarmOpensea(target, wallets, onEvent) {
-  if (target.source !== 'opensea' || !target.slug) return;
+  if (target.source !== "opensea" || !target.slug) return;
   const list = Array.isArray(wallets) ? wallets : [wallets];
-  await Promise.all(list.map(async (w) => {
-    try {
-      await getSessionCookies(w);
-      onEvent({ stage: 'allowlist', eligible: true, wallet: w.address, reason: 'opensea session pre-warmed' });
-    } catch (e) {
-      onEvent({ stage: 'allowlist', eligible: false, wallet: w.address, reason: `pre-warm gagal: ${e.message}` });
-    }
-  }));
+  await Promise.all(
+    list.map(async (w) => {
+      try {
+        await getSessionCookies(w);
+        onEvent({
+          stage: "allowlist",
+          eligible: true,
+          wallet: w.address,
+          reason: "opensea session pre-warmed",
+        });
+      } catch (e) {
+        onEvent({
+          stage: "allowlist",
+          eligible: false,
+          wallet: w.address,
+          reason: `pre-warm gagal: ${e.message}`,
+        });
+      }
+    })
+  );
 }
 
 // Parse a "when" spec into an absolute unix seconds timestamp.
@@ -33,7 +45,9 @@ export function parseWhen(spec, nowMs = Date.now()) {
   const s = String(spec).trim().toLowerCase();
 
   // relative: optional leading "in "
-  let m = s.match(/^(?:in\s+)?(\d+)\s*(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days)$/);
+  let m = s.match(
+    /^(?:in\s+)?(\d+)\s*(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days)$/
+  );
   if (m) {
     const n = Number(m[1]);
     const unit = m[2][0];
@@ -74,7 +88,10 @@ export async function resolveOpenWindow(target) {
   if (!sd.version) return null;
   const drop = await getPublicDrop(sd.seadrop, target.contract, provider);
   if (!(drop.startTime > 0)) return null;
-  return { startTime: drop.startTime, endTime: drop.endTime > 0 ? drop.endTime : 0 };
+  return {
+    startTime: drop.startTime,
+    endTime: drop.endTime > 0 ? drop.endTime : 0,
+  };
 }
 
 // Back-compat: just the open time (used for display). null when unknown.
@@ -86,10 +103,24 @@ export async function resolveOpenTime(target) {
 // Mint at (or just after) an absolute unix timestamp. Delegates the full
 // precise wait + hot-path landing to mintWhenOpen (startAtUnix), so waiting
 // never competes with the poll watch-window. `wallets` may be one or an array.
-export async function mintAt(target, wallets, whenUnix, onEvent = () => {}, opts = {}) {
+export async function mintAt(
+  target,
+  wallets,
+  whenUnix,
+  onEvent = () => {},
+  opts = {}
+) {
   const waitMs = Math.max(0, whenUnix * 1000 - Date.now());
-  onEvent({ stage: 'scheduled', when: whenUnix, waitMs, wib: fmtWIB(whenUnix) });
-  return mintWhenOpen(target, wallets, onEvent, { ...opts, startAtUnix: whenUnix });
+  onEvent({
+    stage: "scheduled",
+    when: whenUnix,
+    waitMs,
+    wib: fmtWIB(whenUnix),
+  });
+  return mintWhenOpen(target, wallets, onEvent, {
+    ...opts,
+    startAtUnix: whenUnix,
+  });
 }
 
 // Tunables adopted from osnm-z:
@@ -100,18 +131,49 @@ export async function mintAt(target, wallets, whenUnix, onEvent = () => {}, opts
 const HOT_LEAD_MS = 2000;
 const REFRESH_MS = 30_000;
 
-const CLOSED_RE = /not active|belum active|notactive|not started|notstarted|notenabled|not enabled|invalidmerkleproof|invalid merkle|simulation revert|execution reverted|mint not|before start|too early/i;
-const FATAL_RE = /insufficient funds|invalid private key|unknown chain|no recognized mint|Price protection|price exceeded|exceeds the maximum price limit/i;
+const CLOSED_RE =
+  /not active|belum active|notactive|not started|notstarted|notenabled|not enabled|invalidmerkleproof|invalid merkle|simulation revert|execution reverted|mint not|before start|too early/i;
+const FATAL_RE =
+  /insufficient funds|invalid private key|unknown chain|no recognized mint|Price protection|price exceeded|exceeds the maximum price limit|jatah mint habis|not eligible/i;
+const TERMINAL_OPENSEA_CODES = new Set([
+  "InsufficientMintsRemainingError",
+  "NotEligibleError",
+]);
+
+export function rateLimitDelayMs(
+  attempt,
+  retryAfterMs = null,
+  random = Math.random
+) {
+  if (retryAfterMs != null && Number.isFinite(Number(retryAfterMs))) {
+    return Math.max(0, Number(retryAfterMs));
+  }
+  const ceiling = Math.min(30_000, 1_000 * 2 ** Math.max(0, attempt - 1));
+  return Math.floor(ceiling / 2 + (random() * ceiling) / 2);
+}
+
+function isFatalMintError(error, message) {
+  return (
+    TERMINAL_OPENSEA_CODES.has(error.code) ||
+    (FATAL_RE.test(message) && !CLOSED_RE.test(message))
+  );
+}
 
 // Poll until the mint is actually open, then send from every wallet. For
 // Seadrop, spins from `startAtUnix` (or the resolved startTime). For generic
 // mints, just polls the simulation. `wallets` may be one wallet or an array.
 // `opts` can include `maxPriceWei` to protect against price changes.
-export async function mintWhenOpen(target, wallets, onEvent = () => {}, opts = {}) {
+export async function mintWhenOpen(
+  target,
+  wallets,
+  onEvent = () => {},
+  opts = {}
+) {
   const list = Array.isArray(wallets) ? wallets : [wallets];
 
   const pollMs = opts.pollMs ?? 400;
   const timeoutMs = opts.timeoutMs ?? 10 * 60 * 1000; // 10 min watch window (polling phase only)
+  const wait = opts.sleep ?? sleep;
   // Injectable for tests; defaults to the real engine. Prod behavior unchanged.
   const attemptMint = opts.mintOne ?? mintOne;
   const attemptMany = opts.mintMany ?? mintMany;
@@ -133,49 +195,79 @@ export async function mintWhenOpen(target, wallets, onEvent = () => {}, opts = {
       if (pInfo && pInfo.priceWei != null) {
         maxPriceWei = pInfo.priceWei;
         onEvent({
-          stage: 'price_protect',
+          stage: "price_protect",
           maxPriceWei,
           maxPriceEth: pInfo.priceEth,
           auto: true,
           source: pInfo.source,
         });
       }
-    } catch { /* if price can't be resolved, maxPriceWei remains undefined */ }
+    } catch {
+      /* if price can't be resolved, maxPriceWei remains undefined */
+    }
   } else if (maxPriceWei != null) {
     onEvent({
-      stage: 'price_protect',
+      stage: "price_protect",
       maxPriceWei,
       maxPriceEth: ethers.formatEther(maxPriceWei),
       auto: false,
     });
   }
 
-  if (openAt == null && target.source === 'opensea' && target.slug) {
+  if (openAt == null && target.source === "opensea" && target.slug) {
     try {
       const cookie = await getSessionCookies(list[0]);
-      const win = await getEligibleOpenWindow(target.slug, list[0].address, cookie);
+      const win = await getEligibleOpenWindow(
+        target.slug,
+        list[0].address,
+        cookie
+      );
       if (win) {
         eligibleStage = win;
         openAt = win.startTime;
         endAt = win.endTime;
-        const label = win.stageType === 'PUBLIC_SALE' ? 'public'
-          : win.stageType === 'SIGNED_PRESALE' ? 'presale/GTD'
-          : win.stageType === 'MERKLE_PRESALE' ? 'allowlist' : `stage ${win.stageIndex}`;
-        const priceTxt = win.priceUnit ? `${win.priceUnit} ${win.symbol}` : 'FREE';
-        onEvent({ stage: 'eligible_stage', stageIndex: win.stageIndex, stageType: win.stageType, label, price: priceTxt, openAt: win.startTime, wib: fmtWIB(win.startTime) });
+        const label =
+          win.stageType === "PUBLIC_SALE"
+            ? "public"
+            : win.stageType === "SIGNED_PRESALE"
+            ? "presale/GTD"
+            : win.stageType === "MERKLE_PRESALE"
+            ? "allowlist"
+            : `stage ${win.stageIndex}`;
+        const priceTxt = win.priceUnit
+          ? `${win.priceUnit} ${win.symbol}`
+          : "FREE";
+        onEvent({
+          stage: "eligible_stage",
+          stageIndex: win.stageIndex,
+          stageType: win.stageType,
+          label,
+          price: priceTxt,
+          openAt: win.startTime,
+          wib: fmtWIB(win.startTime),
+        });
       }
-    } catch { /* eligibility resolve failed → fall through to on-chain */ }
+    } catch {
+      /* eligibility resolve failed → fall through to on-chain */
+    }
   }
   if (openAt == null) {
     try {
       const win = await resolveOpenWindow(target);
-      if (win) { openAt = win.startTime; endAt = win.endTime; }
-    } catch { openAt = null; }
+      if (win) {
+        openAt = win.startTime;
+        endAt = win.endTime;
+      }
+    } catch {
+      openAt = null;
+    }
   }
 
   const nowSec = () => Math.floor(Date.now() / 1000);
   if (openAt != null && endAt > 0 && nowSec() >= endAt) {
-    throw new Error(`The stage has ended (closes ${fmtWIB(endAt)}) — Nothing can be minted`);
+    throw new Error(
+      `The stage has ended (closes ${fmtWIB(endAt)}) — Nothing can be minted`
+    );
   }
 
   // Two-phase wait (osnm-z pattern):
@@ -185,12 +277,12 @@ export async function mintWhenOpen(target, wallets, onEvent = () => {}, opts = {
   //     second so the tx is submitted on the first live block, not a poll later.
   if (openAt != null) {
     while (true) {
-      if (opts.signal?.aborted) throw new Error('schedule cancelled');
+      if (opts.signal?.aborted) throw new Error("schedule cancelled");
       const remainingMs = openAt * 1000 - Date.now();
       if (remainingMs <= HOT_LEAD_MS) break;
 
       const chunk = Math.min(remainingMs - HOT_LEAD_MS, REFRESH_MS);
-      onEvent({ stage: 'waiting_open', openAt, wib: fmtWIB(openAt) });
+      onEvent({ stage: "waiting_open", openAt, wib: fmtWIB(openAt) });
       await sleep(chunk);
 
       // Re-probe the SAME source the window came from, so an OpenSea
@@ -202,35 +294,63 @@ export async function mintWhenOpen(target, wallets, onEvent = () => {}, opts = {
         try {
           if (eligibleStage) {
             const cookie = await getSessionCookies(list[0]);
-            const win = await getEligibleOpenWindow(target.slug, list[0].address, cookie);
+            const win = await getEligibleOpenWindow(
+              target.slug,
+              list[0].address,
+              cookie
+            );
             if (win) {
               if (win.endTime > 0 && nowSec() >= win.endTime) {
-                throw new Error(`The stage has ended (closes ${fmtWIB(win.endTime)}) — Nothing can be minted.`);
+                throw new Error(
+                  `The stage has ended (closes ${fmtWIB(
+                    win.endTime
+                  )}) — Nothing can be minted.`
+                );
               }
               if (maxPriceWei != null && win.priceUnit != null) {
-                const curWei = ethers.parseEther(String(win.priceUnit)) * BigInt(target.amount || 1);
-                assertPriceProtection({ actualPriceWei: curWei, maxPriceWei, context: 'stage update' });
+                const curWei =
+                  ethers.parseEther(String(win.priceUnit)) *
+                  BigInt(target.amount || 1);
+                assertPriceProtection({
+                  actualPriceWei: curWei,
+                  maxPriceWei,
+                  context: "stage update",
+                });
               }
               eligibleStage = win;
-              openAt = win.startTime; endAt = win.endTime;
+              openAt = win.startTime;
+              endAt = win.endTime;
             }
           } else {
             const win = await resolveOpenWindow(target);
             if (win) {
               if (win.endTime > 0 && nowSec() >= win.endTime) {
-                throw new Error(`The stage has ended (closes ${fmtWIB(win.endTime)}) — Nothing can be minted.`);
+                throw new Error(
+                  `The stage has ended (closes ${fmtWIB(
+                    win.endTime
+                  )}) — Nothing can be minted.`
+                );
               }
-              openAt = win.startTime; endAt = win.endTime;
+              openAt = win.startTime;
+              endAt = win.endTime;
             }
             if (maxPriceWei != null) {
               try {
                 const provider = getProvider(target.chain);
                 const sd = await detectSeadrop(target.contract, provider);
                 if (sd.version) {
-                  const drop = await getPublicDrop(sd.seadrop, target.contract, provider);
+                  const drop = await getPublicDrop(
+                    sd.seadrop,
+                    target.contract,
+                    provider
+                  );
                   if (drop.mintPrice != null) {
                     const curWei = drop.mintPrice * BigInt(target.amount || 1);
-                    assertPriceProtection({ actualPriceWei: curWei, maxPriceWei, context: 'drop update' });
+                    assertPriceProtection({
+                      actualPriceWei: curWei,
+                      maxPriceWei,
+                      context: "drop update",
+                    });
                   }
                 }
               } catch (e) {
@@ -250,7 +370,7 @@ export async function mintWhenOpen(target, wallets, onEvent = () => {}, opts = {
 
     // Hot path: sleep precisely to the open second.
     while (true) {
-      if (opts.signal?.aborted) throw new Error('schedule cancelled');
+      if (opts.signal?.aborted) throw new Error("schedule cancelled");
       const remainingMs = openAt * 1000 - Date.now();
       if (remainingMs <= 0) break;
       await sleep(remainingMs);
@@ -263,13 +383,14 @@ export async function mintWhenOpen(target, wallets, onEvent = () => {}, opts = {
   // Start the poll watch-window AFTER the wait, so the full timeout covers the
   // polling phase — never consumed by waiting for open.
   const deadline = Date.now() + timeoutMs;
-  onEvent({ stage: 'polling', pollMs });
+  onEvent({ stage: "polling", pollMs });
 
   let attempts = 0;
-  let lastErr = 'unknown';
+  let rateLimitAttempts = 0;
+  let lastErr = "unknown";
   const mintOpts = { ...opts, maxPriceWei };
   while (Date.now() < deadline) {
-    if (opts.signal?.aborted) throw new Error('schedule cancelled');
+    if (opts.signal?.aborted) throw new Error("schedule cancelled");
     attempts += 1;
     try {
       // Probe openness with the first wallet. A fatal (non-timing) error
@@ -281,10 +402,30 @@ export async function mintWhenOpen(target, wallets, onEvent = () => {}, opts = {
       return [first, ...rest];
     } catch (e) {
       lastErr = e.shortMessage || e.message;
-      if (FATAL_RE.test(lastErr) && !CLOSED_RE.test(lastErr)) throw e;
-      if (attempts % 10 === 0) onEvent({ stage: 'still_closed', attempts, lastErr });
-      await sleep(pollMs);
+      if (isFatalMintError(e, lastErr)) throw e;
+      if (e.status === 429) {
+        rateLimitAttempts += 1;
+        const delayMs = rateLimitDelayMs(
+          rateLimitAttempts,
+          e.retryAfterMs,
+          opts.random
+        );
+        onEvent({
+          stage: "rate_limited",
+          attempts,
+          delayMs,
+          retryAfterMs: e.retryAfterMs,
+        });
+        await wait(Math.min(delayMs, Math.max(0, deadline - Date.now())));
+        continue;
+      }
+      rateLimitAttempts = 0;
+      if (attempts % 10 === 0)
+        onEvent({ stage: "still_closed", attempts, lastErr });
+      await wait(pollMs);
     }
   }
-  throw new Error(`watch window elapsed (${attempts} attempts). last: ${lastErr}`);
+  throw new Error(
+    `watch window elapsed (${attempts} attempts). last: ${lastErr}`
+  );
 }
