@@ -2,7 +2,7 @@ import { ethers } from "ethers";
 import { getProvider } from "./chains.js";
 import { mintMany, mintOne } from "./mint.js";
 import { getSessionCookies } from "./opensea-auth.js";
-import { getEligibleOpenWindow } from "./opensea-drop.js";
+import { getDropStages, getEligibleOpenWindow } from "./opensea-drop.js";
 import { assertPriceProtection, resolveTargetPrice } from "./price.js";
 import { detectSeadrop, getPublicDrop } from "./seadrop.js";
 import { fmtWAT } from "./time.js";
@@ -136,6 +136,35 @@ export function pickEffectiveOpenAt({
   return values.length ? Math.min(...values) : null;
 }
 
+export function assertOpenSeaDropNotEnded(
+  stages,
+  nowSec = Math.floor(Date.now() / 1000)
+) {
+  if (
+    !Array.isArray(stages) ||
+    stages.length === 0 ||
+    stages.some(
+      (stage) =>
+        !Number.isFinite(Number(stage.startTime)) ||
+        Number(stage.startTime) <= 0 ||
+        !Number.isFinite(Number(stage.endTime)) ||
+        Number(stage.endTime) <= 0
+    )
+  ) {
+    return null;
+  }
+
+  const endAt = Math.max(...stages.map((stage) => Number(stage.endTime)));
+  if (nowSec >= endAt) {
+    throw new Error(
+      `The OpenSea drop has ended (last stage closed ${fmtWAT(
+        endAt
+      )}) — Nothing can be minted`
+    );
+  }
+  return endAt;
+}
+
 export function rateLimitDelayMs(
   attempt,
   retryAfterMs = null,
@@ -178,6 +207,16 @@ export async function mintWhenOpen(
   let endAt = opts.endAtUnix ?? 0;
   let eligibleStage = null;
   let fallbackOpenAt = null;
+  let openSeaDrop = null;
+
+  if (target.source === "opensea" && target.slug) {
+    try {
+      openSeaDrop = await (opts.getDropStages ?? getDropStages)(target.slug);
+    } catch {
+      /* OpenSea stage data is best-effort; retain the on-chain fallback. */
+    }
+    assertOpenSeaDropNotEnded(openSeaDrop?.stages);
+  }
 
   // Resolve price protection: explicit maxPriceWei or auto-lock to initial detected price.
   let maxPriceWei = opts.maxPriceWei;
@@ -212,7 +251,8 @@ export async function mintWhenOpen(
       const win = await getEligibleOpenWindow(
         target.slug,
         list[0].address,
-        cookie
+        cookie,
+        openSeaDrop
       );
       if (win) {
         eligibleStage = win;
@@ -265,6 +305,7 @@ export async function mintWhenOpen(
   }
 
   const nowSec = () => Math.floor(Date.now() / 1000);
+  assertOpenSeaDropNotEnded(openSeaDrop?.stages, nowSec());
   if (openAt != null && endAt > 0 && nowSec() >= endAt) {
     throw new Error(
       `The stage has ended (closes ${fmtWAT(endAt)}) — Nothing can be minted`
@@ -279,6 +320,7 @@ export async function mintWhenOpen(
   if (openAt != null) {
     while (true) {
       if (opts.signal?.aborted) throw new Error("schedule cancelled");
+      assertOpenSeaDropNotEnded(openSeaDrop?.stages, nowSec());
       const remainingMs = openAt * 1000 - Date.now();
       if (remainingMs <= HOT_LEAD_MS) break;
 
@@ -392,6 +434,7 @@ export async function mintWhenOpen(
   const mintOpts = { ...opts, maxPriceWei };
   while (Date.now() < deadline) {
     if (opts.signal?.aborted) throw new Error("schedule cancelled");
+    assertOpenSeaDropNotEnded(openSeaDrop?.stages, nowSec());
     attempts += 1;
     try {
       // Probe openness with the first wallet. A fatal (non-timing) error

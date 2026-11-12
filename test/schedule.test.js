@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   mintWhenOpen,
+  assertOpenSeaDropNotEnded,
   pickEffectiveOpenAt,
   rateLimitDelayMs,
 } from "../src/schedule.js";
@@ -122,6 +123,45 @@ test("prefers an earlier eligible OpenSea stage over a later scheduled time", ()
       fallbackOpenAt: fallback,
     }),
     requested
+  );
+});
+
+test("fails before waiting when every OpenSea stage has ended", async () => {
+  let mintCalls = 0;
+  const endedStages = {
+    stages: [
+      { startTime: 100, endTime: 200 },
+      { startTime: 200, endTime: 300 },
+    ],
+  };
+
+  await assert.rejects(
+    mintWhenOpen(
+      { ...target, source: "opensea", slug: "jpegz" },
+      wallet,
+      () => {},
+      {
+        maxPriceWei: null,
+        getDropStages: async () => endedStages,
+        mintOne: async () => {
+          mintCalls += 1;
+        },
+      }
+    ),
+    /The OpenSea drop has ended/
+  );
+  assert.equal(mintCalls, 0);
+});
+
+test("does not infer the drop ended when a stage has no end time", () => {
+  assert.doesNotThrow(() =>
+    assertOpenSeaDropNotEnded(
+      [
+        { startTime: 100, endTime: 200 },
+        { startTime: 200, endTime: 0 },
+      ],
+      300
+    )
   );
 });
 

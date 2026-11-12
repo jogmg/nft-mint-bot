@@ -449,9 +449,14 @@ export async function getDropEligibility(slug, minterAddress, cookie) {
 // Returns { stageIndex, stageType, startTime, endTime, priceUnit, symbol,
 // maxPerWallet } for the earliest eligible stage, or null when the wallet is
 // eligible for nothing / the session wasn't accepted.
-export async function getEligibleOpenWindow(slug, minterAddress, cookie) {
+export async function getEligibleOpenWindow(
+  slug,
+  minterAddress,
+  cookie,
+  moduleData = null
+) {
   const [mod, elig] = await Promise.all([
-    getDropStages(slug),
+    moduleData ?? getDropStages(slug),
     getDropEligibility(slug, minterAddress, cookie),
   ]);
   if (!mod || !elig || !elig.authed) return null;
